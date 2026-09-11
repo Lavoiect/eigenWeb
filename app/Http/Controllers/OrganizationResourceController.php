@@ -367,6 +367,13 @@ class OrganizationResourceController extends Controller
         $resourceRole = $resource->organization_role !== null
             ? OrganizationRole::tryFrom($resource->organization_role)
             : null;
+        $jobTitleIds = $this->normalizeAssociationIds($resource->job_title_ids);
+        $teamIds = $this->normalizeAssociationIds($resource->team_ids);
+        $locationIds = $this->normalizeAssociationIds($resource->location_ids);
+        $courseIds = $this->normalizeAssociationIds(
+            $resource->course_ids,
+            $resource->course_id,
+        );
 
         return [
             'id' => $resource->id,
@@ -391,15 +398,28 @@ class OrganizationResourceController extends Controller
             'organization_role' => $resource->organization_role,
             'organization_role_label' => $resourceRole?->label(),
             'audience_everyone' => $resource->audience_everyone ?? $resource->organization_role === null,
-            'job_title_ids' => $resource->job_title_ids ?? [],
-            'team_ids' => $resource->team_ids ?? [],
-            'location_ids' => $resource->location_ids ?? [],
-            'course_ids' => $resource->course_ids ?? ($resource->course_id ? [$resource->course_id] : []),
-            'job_titles' => JobTitle::query()->whereIn('id', $resource->job_title_ids ?? [])->pluck('name')->values(),
-            'teams' => Team::query()->whereIn('id', $resource->team_ids ?? [])->pluck('name')->values(),
-            'locations' => Location::query()->whereIn('id', $resource->location_ids ?? [])->pluck('name')->values(),
+            'job_title_ids' => $jobTitleIds,
+            'team_ids' => $teamIds,
+            'location_ids' => $locationIds,
+            'course_ids' => $courseIds,
+            'job_titles' => JobTitle::query()
+                ->where('organization_id', $resource->organization_id)
+                ->whereIn('id', $jobTitleIds)
+                ->pluck('name')
+                ->values(),
+            'teams' => Team::query()
+                ->where('organization_id', $resource->organization_id)
+                ->whereIn('id', $teamIds)
+                ->pluck('name')
+                ->values(),
+            'locations' => Location::query()
+                ->where('organization_id', $resource->organization_id)
+                ->whereIn('id', $locationIds)
+                ->pluck('name')
+                ->values(),
             'related_courses' => Course::query()
-                ->whereIn('id', $resource->course_ids ?? ($resource->course_id ? [$resource->course_id] : []))
+                ->where('organization_id', $resource->organization_id)
+                ->whereIn('id', $courseIds)
                 ->get(['id', 'title', 'status'])
                 ->values(),
             'revision_date' => $resource->revision_date?->toDateString(),
@@ -421,6 +441,20 @@ class OrganizationResourceController extends Controller
             'created_at' => $resource->created_at?->toIso8601String(),
             'updated_at' => $resource->updated_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * @param  array<int, int|string>|null  $ids
+     * @return array<int, int>
+     */
+    private function normalizeAssociationIds(?array $ids, ?int $legacyId = null): array
+    {
+        return collect([...($ids ?? []), $legacyId])
+            ->filter(fn (mixed $id): bool => is_numeric($id) && (int) $id > 0)
+            ->map(fn (mixed $id): int => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function fileTypeLabel(?string $mimeType): string

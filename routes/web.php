@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\CourseReviewController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\LearnerTranscriptController;
 use App\Http\Controllers\OrganizationCourseManagementController;
@@ -153,6 +154,8 @@ Route::middleware(['auth', 'verified', 'password.changed'])->group(function () {
                     ->name('organizations.courses.duplicate');
                 Route::patch('{course}/archive', [OrganizationCourseManagementController::class, 'archive'])
                     ->name('organizations.courses.archive');
+                Route::post('{course}/reviews', [CourseReviewController::class, 'store'])
+                    ->name('organizations.courses.reviews.store');
                 Route::post('{course}/assignments', [OrganizationCourseManagementController::class, 'storeAssignment'])
                     ->name('organizations.courses.assignments.store');
                 Route::patch('{course}/assignments/{assignment}', [OrganizationCourseManagementController::class, 'updateAssignment'])
@@ -191,6 +194,16 @@ Route::middleware(['auth', 'verified', 'password.changed'])->group(function () {
                 Route::delete('{course}/lessons/{lesson}', [OrganizationCourseManagementController::class, 'destroyLesson'])
                     ->name('organizations.courses.lessons.destroy');
             });
+        });
+
+    Route::prefix('organizations/{organization}/course-reviews/{review}')
+        ->group(function () {
+            Route::get('/', [CourseReviewController::class, 'show'])
+                ->name('organizations.course-reviews.show');
+            Route::post('comments', [CourseReviewController::class, 'storeComment'])
+                ->name('organizations.course-reviews.comments.store');
+            Route::patch('decision', [CourseReviewController::class, 'decide'])
+                ->name('organizations.course-reviews.decision.update');
         });
 
     Route::prefix('teams/{team}')

@@ -70,6 +70,7 @@ test('organization admins can open the resource portal', function () {
             ->component('organizations/resources/index')
             ->where('organization.id', $organization->id)
             ->where('resources.0.title', 'PPE checklist')
+            ->where('resources.0.course_ids.0', $course->id)
             ->where('resources.0.latest_version', null)
             ->where('roleOptions.2.label', 'Manager'));
 });

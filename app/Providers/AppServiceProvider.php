@@ -3,10 +3,12 @@
 namespace App\Providers;
 
 use App\Models\Course;
+use App\Models\CourseReview;
 use App\Models\Lesson;
 use App\Models\Organization;
 use App\Models\Team;
 use App\Policies\CoursePolicy;
+use App\Policies\CourseReviewPolicy;
 use App\Policies\LessonPolicy;
 use App\Policies\OrganizationPolicy;
 use App\Policies\TeamPolicy;
@@ -62,6 +64,7 @@ class AppServiceProvider extends ServiceProvider
     {
         Gate::policy(Organization::class, OrganizationPolicy::class);
         Gate::policy(Course::class, CoursePolicy::class);
+        Gate::policy(CourseReview::class, CourseReviewPolicy::class);
         Gate::policy(Lesson::class, LessonPolicy::class);
         Gate::policy(Team::class, TeamPolicy::class);
     }

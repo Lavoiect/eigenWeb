@@ -92,6 +92,11 @@ class Course extends Model
         return $this->hasMany(CourseProgress::class);
     }
 
+    public function reviews(): HasMany
+    {
+        return $this->hasMany(CourseReview::class)->orderByDesc('revision_number');
+    }
+
     public function isPublished(): bool
     {
         return $this->status === 'published' && $this->published_at !== null;

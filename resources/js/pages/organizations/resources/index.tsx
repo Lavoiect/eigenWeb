@@ -247,6 +247,12 @@ function audienceLabel(resource: ResourceRow): string {
     return labels.length > 0 ? labels.join(', ') : 'Not assigned';
 }
 
+function includesId(ids: number[], value: string): boolean {
+    const expectedId = Number(value);
+
+    return ids.some((id) => Number(id) === expectedId);
+}
+
 function resourceIcon(type: ResourceType) {
     if (type === 'quick_guide') {
         return BookOpen;
@@ -1371,14 +1377,27 @@ export default function OrganizationResourcesIndex() {
     const previewResource =
         resources.find((resource) => resource.id === previewId) ?? null;
 
+    const activeResources = resources.filter(
+        (resource) => resource.status !== 'archived',
+    );
     const counts = {
-        all: resources.length,
-        featured: resources.filter((resource) => resource.featured).length,
-        needs_review: resources.filter((resource) => resource.needs_review)
+        all: activeResources.length,
+        featured: activeResources.filter((resource) => resource.featured)
             .length,
+        needs_review: activeResources.filter(
+            (resource) => resource.needs_review,
+        ).length,
         archived: resources.filter((resource) => resource.status === 'archived')
             .length,
     };
+    const activeFilterCount = [
+        search.trim() !== '',
+        typeFilter !== 'all',
+        categoryFilter !== 'all',
+        audienceFilter !== 'all',
+        courseFilter !== 'all',
+        updatedFilter !== 'all',
+    ].filter(Boolean).length;
 
     const filteredResources = useMemo(() => {
         const query = search.trim().toLowerCase();
@@ -1405,14 +1424,15 @@ export default function OrganizationResourcesIndex() {
 
             if (
                 categoryFilter !== 'all' &&
-                resource.category !== categoryFilter
+                resource.category?.trim().toLocaleLowerCase() !==
+                    categoryFilter.trim().toLocaleLowerCase()
             ) {
                 return false;
             }
 
             if (
                 courseFilter !== 'all' &&
-                !resource.course_ids.includes(Number(courseFilter))
+                !includesId(resource.course_ids, courseFilter)
             ) {
                 return false;
             }
@@ -1427,8 +1447,9 @@ export default function OrganizationResourcesIndex() {
 
                 if (
                     audienceFilter.startsWith('job:') &&
-                    !resource.job_title_ids.includes(
-                        Number(audienceFilter.split(':')[1]),
+                    !includesId(
+                        resource.job_title_ids,
+                        audienceFilter.split(':')[1],
                     )
                 ) {
                     return false;
@@ -1436,17 +1457,16 @@ export default function OrganizationResourcesIndex() {
 
                 if (
                     audienceFilter.startsWith('team:') &&
-                    !resource.team_ids.includes(
-                        Number(audienceFilter.split(':')[1]),
-                    )
+                    !includesId(resource.team_ids, audienceFilter.split(':')[1])
                 ) {
                     return false;
                 }
 
                 if (
                     audienceFilter.startsWith('location:') &&
-                    !resource.location_ids.includes(
-                        Number(audienceFilter.split(':')[1]),
+                    !includesId(
+                        resource.location_ids,
+                        audienceFilter.split(':')[1],
                     )
                 ) {
                     return false;
@@ -1525,6 +1545,15 @@ export default function OrganizationResourcesIndex() {
         sort,
         currentTimestamp,
     ]);
+
+    const clearFilters = () => {
+        setSearch('');
+        setTypeFilter('all');
+        setCategoryFilter('all');
+        setAudienceFilter('all');
+        setCourseFilter('all');
+        setUpdatedFilter('all');
+    };
 
     const featuredResources = filteredResources
         .filter((resource) => resource.featured)
@@ -1741,6 +1770,24 @@ export default function OrganizationResourcesIndex() {
                                 <option value="views">Most viewed</option>
                             </select>
                         </div>
+                        {activeFilterCount > 0 && (
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+                                <p className="text-sm text-muted-foreground">
+                                    {activeFilterCount} active filter
+                                    {activeFilterCount === 1 ? '' : 's'} ·{' '}
+                                    {filteredResources.length} matching resource
+                                    {filteredResources.length === 1 ? '' : 's'}
+                                </p>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={clearFilters}
+                                >
+                                    <X className="size-4" /> Clear filters
+                                </Button>
+                            </div>
+                        )}
                     </CardContent>
                 </Card>
 

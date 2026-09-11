@@ -16,10 +16,12 @@ import {
     GripVertical,
     ImageIcon,
     Layers3,
+    MessageSquareText,
     Plus,
     Save,
     Settings2,
     Search,
+    Send,
     Sparkles,
     RotateCcw,
     Trash2,
@@ -87,6 +89,29 @@ type CourseAsset = {
     }[];
     created_at: string | null;
     updated_at: string | null;
+};
+
+type PortalResource = {
+    id: number;
+    title: string;
+    description: string | null;
+    category: string | null;
+    tags: string[];
+    resource_type: 'file' | 'video' | 'external_link';
+    media_kind: 'image' | 'video' | 'document';
+    url: string;
+    mime_type: string | null;
+    featured: boolean;
+    version_id: number | null;
+    version_number: number | null;
+    original_name: string | null;
+    updated_at: string | null;
+};
+
+type PortalPickerTarget = {
+    lessonId: number;
+    blockId: string;
+    mediaKind: PortalResource['media_kind'];
 };
 
 type Course = {
@@ -172,6 +197,31 @@ type PageProps = {
     jobTitles: OrganizationJobTitle[];
     locations: OrganizationLocation[];
     employees: OrganizationEmployee[];
+    reviewers: CourseReviewer[];
+    latest_review: CourseReviewSummary | null;
+    resource_library: PortalResource[];
+};
+
+type CourseReviewer = {
+    id: number;
+    name: string;
+    email: string;
+    role: string | null;
+};
+
+type CourseReviewSummary = {
+    id: number;
+    revision_number: number;
+    status: 'in_review' | 'changes_requested' | 'approved';
+    status_label: string;
+    content_matches: boolean;
+    due_at: string | null;
+    submitted_at: string | null;
+    decided_at: string | null;
+    comments_count: number;
+    reviewer: Pick<CourseReviewer, 'id' | 'name' | 'email'> | null;
+    submitter: Pick<CourseReviewer, 'id' | 'name' | 'email'> | null;
+    url: string;
 };
 
 type OrganizationTeam = {
@@ -720,6 +770,16 @@ function createBlock(type: string): LessonBlock {
     }
 }
 
+function clearPortalReference(block: LessonBlock): LessonBlock {
+    return {
+        ...block,
+        portal_resource_id: null,
+        portal_resource_version_id: null,
+        portal_resource_version_number: null,
+        portal_resource_title: null,
+    };
+}
+
 function lessonHasContent(lesson: LessonDraft): boolean {
     return lesson.content.some((block) => {
         switch (block.type) {
@@ -804,6 +864,53 @@ function getBlockSummary(block: LessonBlock): string {
     }
 }
 
+function PortalReferenceControl({
+    linkedTitle,
+    onChoose,
+    onUnlink,
+}: {
+    linkedTitle: string;
+    onChoose: () => void;
+    onUnlink: () => void;
+}) {
+    return (
+        <div className="flex flex-col gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+                <p className="text-xs font-semibold tracking-[0.16em] text-emerald-800 uppercase">
+                    Resource Portal
+                </p>
+                <p className="mt-1 truncate text-sm text-emerald-950">
+                    {linkedTitle
+                        ? `Linked to ${linkedTitle}`
+                        : 'Use an existing approved organization resource.'}
+                </p>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+                {linkedTitle && (
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={onUnlink}
+                    >
+                        Unlink
+                    </Button>
+                )}
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={onChoose}
+                    className="border-emerald-300 bg-white"
+                >
+                    <BookOpen className="size-4" />
+                    {linkedTitle ? 'Change resource' : 'Choose resource'}
+                </Button>
+            </div>
+        </div>
+    );
+}
+
 function CourseBuilderPage({
     organization,
     microlearning_templates,
@@ -821,6 +928,9 @@ function CourseBuilderPage({
     jobTitles,
     locations,
     employees,
+    reviewers,
+    latest_review,
+    resource_library,
 }: PageProps) {
     const settingsRef = useRef<HTMLDivElement | null>(null);
     const assignmentRef = useRef<HTMLDivElement | null>(null);
@@ -852,6 +962,9 @@ function CourseBuilderPage({
     );
     const [activityPickerOpen, setActivityPickerOpen] = useState(false);
     const [activitySearch, setActivitySearch] = useState('');
+    const [portalPickerTarget, setPortalPickerTarget] =
+        useState<PortalPickerTarget | null>(null);
+    const [portalResourceSearch, setPortalResourceSearch] = useState('');
     const [blockInsertionIndex, setBlockInsertionIndex] = useState<
         number | null
     >(null);
@@ -864,6 +977,16 @@ function CourseBuilderPage({
     const [readinessOpen, setReadinessOpen] = useState(false);
     const [publishReviewOpen, setPublishReviewOpen] = useState(false);
     const [publishLessonIds, setPublishLessonIds] = useState<number[]>([]);
+    const [courseReviewOpen, setCourseReviewOpen] = useState(false);
+    const [courseReviewDraft, setCourseReviewDraft] = useState({
+        reviewerId: reviewers[0] ? String(reviewers[0].id) : '',
+        dueAt: '',
+        note: '',
+    });
+    const [courseReviewErrors, setCourseReviewErrors] = useState<
+        Record<string, string>
+    >({});
+    const [courseReviewSaving, setCourseReviewSaving] = useState(false);
     const [lessonSettingsOpen, setLessonSettingsOpen] = useState(false);
     const [hasPreviewedAsLearner, setHasPreviewedAsLearner] = useState(
         selected_preview_mode === 'full',
@@ -940,10 +1063,49 @@ function CourseBuilderPage({
             null,
         [lessonDrafts, selectedLessonId],
     );
+    const compatiblePortalResources = useMemo(() => {
+        if (!portalPickerTarget) {
+            return [];
+        }
+
+        const query = portalResourceSearch.trim().toLocaleLowerCase();
+
+        return resource_library.filter((resource) => {
+            if (resource.media_kind !== portalPickerTarget.mediaKind) {
+                return false;
+            }
+
+            if (!query) {
+                return true;
+            }
+
+            return [
+                resource.title,
+                resource.description ?? '',
+                resource.category ?? '',
+                resource.original_name ?? '',
+                resource.tags.join(' '),
+            ]
+                .join(' ')
+                .toLocaleLowerCase()
+                .includes(query);
+        });
+    }, [portalPickerTarget, portalResourceSearch, resource_library]);
     const finalAssessment = lessonDrafts.find(
         (lesson) => lesson.is_final_assessment,
     );
     const hasUnsavedChanges = courseHasChanges || dirtyLessonIds.length > 0;
+    const reviewBlocksPublishing = Boolean(
+        latest_review &&
+        (latest_review.status !== 'approved' ||
+            !latest_review.content_matches ||
+            hasUnsavedChanges),
+    );
+    const canSubmitNewReview =
+        latest_review === null ||
+        latest_review.status === 'changes_requested' ||
+        (latest_review.status === 'approved' &&
+            (!latest_review.content_matches || hasUnsavedChanges));
 
     const activeBlock = selectedLesson?.content[activeBlockIndex] ?? null;
 
@@ -1027,7 +1189,8 @@ function CourseBuilderPage({
         publishLessonIds.length === 0 ||
         selectedPublishLessonsMissingContent.length > 0 ||
         finalAssessmentMissingFromPublish ||
-        Boolean(finalAssessment && !finalAssessmentHasQuestions);
+        Boolean(finalAssessment && !finalAssessmentHasQuestions) ||
+        reviewBlocksPublishing;
 
     const issues = useMemo(() => {
         const next: string[] = [];
@@ -1399,6 +1562,93 @@ function CourseBuilderPage({
             ...lesson,
             content: lesson.content.map((block, blockIndex) =>
                 blockIndex === index ? updater(block) : block,
+            ),
+        }));
+    };
+
+    const openPortalResourcePicker = (
+        block: LessonBlock,
+        mediaKind: PortalResource['media_kind'],
+    ) => {
+        if (!selectedLesson) {
+            return;
+        }
+
+        setPortalResourceSearch('');
+        setPortalPickerTarget({
+            lessonId: selectedLesson.id,
+            blockId: block.id,
+            mediaKind,
+        });
+    };
+
+    const applyPortalResource = (resource: PortalResource) => {
+        if (!portalPickerTarget) {
+            return;
+        }
+
+        const target = portalPickerTarget;
+        updateLessonDraft(target.lessonId, (lesson) => ({
+            ...lesson,
+            content: lesson.content.map((block) => {
+                if (block.id !== target.blockId) {
+                    return block;
+                }
+
+                const portalFields = {
+                    url: resource.url,
+                    portal_resource_id: resource.id,
+                    portal_resource_version_id: resource.version_id,
+                    portal_resource_version_number: resource.version_number,
+                    portal_resource_title: resource.title,
+                };
+
+                if (target.mediaKind === 'image') {
+                    return {
+                        ...block,
+                        ...portalFields,
+                        alt: String(block.alt ?? '').trim() || resource.title,
+                        caption:
+                            String(block.caption ?? '').trim() ||
+                            resource.description ||
+                            '',
+                    };
+                }
+
+                if (target.mediaKind === 'video') {
+                    return {
+                        ...block,
+                        ...portalFields,
+                        caption:
+                            String(block.caption ?? '').trim() ||
+                            resource.title,
+                    };
+                }
+
+                return {
+                    ...block,
+                    ...portalFields,
+                    title: resource.title,
+                    description:
+                        String(block.description ?? '').trim() ||
+                        resource.description ||
+                        '',
+                };
+            }),
+        }));
+        setPortalPickerTarget(null);
+        setPortalResourceSearch('');
+    };
+
+    const removePortalResourceReference = (blockId: string) => {
+        if (!selectedLesson) {
+            return;
+        }
+
+        updateSelectedLesson((lesson) => ({
+            ...lesson,
+            content: lesson.content.map((block) =>
+                block.id === blockId ? clearPortalReference(block) : block,
             ),
         }));
     };
@@ -1956,7 +2206,7 @@ function CourseBuilderPage({
             updateSelectedBlock(index, (current) => {
                 if (kind === 'video') {
                     return {
-                        ...current,
+                        ...clearPortalReference(current),
                         url: asset.url,
                         caption:
                             String(current.caption ?? '').trim() ||
@@ -1967,7 +2217,7 @@ function CourseBuilderPage({
                 const baseName = asset.original_name.replace(/\.[^.]+$/, '');
 
                 return {
-                    ...current,
+                    ...clearPortalReference(current),
                     url: asset.url,
                     title: String(current.title ?? '').trim() || baseName,
                 };
@@ -2017,7 +2267,7 @@ function CourseBuilderPage({
         updateSelectedBlock(activeBlockIndex, (current) => {
             if (asset.kind === 'video') {
                 return {
-                    ...current,
+                    ...clearPortalReference(current),
                     url: asset.url,
                     caption:
                         String(current.caption ?? '').trim() ||
@@ -2026,7 +2276,7 @@ function CourseBuilderPage({
             }
 
             return {
-                ...current,
+                ...clearPortalReference(current),
                 url: asset.url,
                 title:
                     String(current.title ?? '').trim() ||
@@ -2169,6 +2419,45 @@ function CourseBuilderPage({
         }
 
         saveCourseChanges();
+    };
+
+    const submitCourseReview = () => {
+        if (!courseReviewDraft.reviewerId) {
+            setCourseReviewErrors({
+                reviewer_id: 'Choose a reviewer before sending the course.',
+            });
+
+            return;
+        }
+
+        setCourseReviewSaving(true);
+        setCourseReviewErrors({});
+
+        router.post(
+            `/organizations/${organization.id}/courses/${course.id}/reviews`,
+            {
+                reviewer_id: Number(courseReviewDraft.reviewerId),
+                due_at: courseReviewDraft.dueAt || null,
+                note: courseReviewDraft.note.trim() || null,
+            },
+            {
+                preserveScroll: true,
+                onError: (errors) =>
+                    setCourseReviewErrors(errors as Record<string, string>),
+                onSuccess: () => setCourseReviewOpen(false),
+                onFinish: () => setCourseReviewSaving(false),
+            },
+        );
+    };
+
+    const sendCourseForReview = () => {
+        if (hasUnsavedChanges) {
+            saveChanges(submitCourseReview);
+
+            return;
+        }
+
+        submitCourseReview();
     };
 
     const createLessonRecord = (isFinalAssessment = false) => {
@@ -2469,6 +2758,22 @@ function CourseBuilderPage({
                                             ? 'Published'
                                             : 'Draft'}
                                     </Badge>
+                                    {latest_review && (
+                                        <Badge
+                                            variant="outline"
+                                            className={
+                                                latest_review.status ===
+                                                'approved'
+                                                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                                                    : latest_review.status ===
+                                                        'changes_requested'
+                                                      ? 'border-amber-200 bg-amber-50 text-amber-900'
+                                                      : 'border-sky-200 bg-sky-50 text-sky-800'
+                                            }
+                                        >
+                                            Review: {latest_review.status_label}
+                                        </Badge>
+                                    )}
                                     {saveState === 'saving' ? (
                                         <Badge variant="outline">
                                             <Spinner />
@@ -2510,6 +2815,30 @@ function CourseBuilderPage({
                                     {saveState === 'saving'
                                         ? 'Saving changes'
                                         : 'Save changes'}
+                                </Button>
+                            )}
+                            {latest_review && (
+                                <Button asChild variant="outline">
+                                    <Link href={latest_review.url}>
+                                        <MessageSquareText className="size-4" />
+                                        View review
+                                        {latest_review.comments_count > 0 &&
+                                            ` (${latest_review.comments_count})`}
+                                    </Link>
+                                </Button>
+                            )}
+                            {canSubmitNewReview && (
+                                <Button
+                                    variant="outline"
+                                    onClick={() => {
+                                        setCourseReviewErrors({});
+                                        setCourseReviewOpen(true);
+                                    }}
+                                >
+                                    <Send className="size-4" />
+                                    {latest_review
+                                        ? 'Resubmit for review'
+                                        : 'Send for review'}
                                 </Button>
                             )}
                             <Button
@@ -5047,6 +5376,25 @@ function CourseBuilderPage({
                                                                         {block.type ===
                                                                             'image' && (
                                                                             <div className="grid gap-4 md:grid-cols-2">
+                                                                                <div className="md:col-span-2">
+                                                                                    <PortalReferenceControl
+                                                                                        linkedTitle={String(
+                                                                                            block.portal_resource_title ??
+                                                                                                '',
+                                                                                        )}
+                                                                                        onChoose={() =>
+                                                                                            openPortalResourcePicker(
+                                                                                                block,
+                                                                                                'image',
+                                                                                            )
+                                                                                        }
+                                                                                        onUnlink={() =>
+                                                                                            removePortalResourceReference(
+                                                                                                block.id,
+                                                                                            )
+                                                                                        }
+                                                                                    />
+                                                                                </div>
                                                                                 <div className="grid gap-2">
                                                                                     <Label>
                                                                                         Image
@@ -5065,7 +5413,9 @@ function CourseBuilderPage({
                                                                                                 (
                                                                                                     current,
                                                                                                 ) => ({
-                                                                                                    ...current,
+                                                                                                    ...clearPortalReference(
+                                                                                                        current,
+                                                                                                    ),
                                                                                                     url: event
                                                                                                         .target
                                                                                                         .value,
@@ -5146,6 +5496,25 @@ function CourseBuilderPage({
                                                                         {block.type ===
                                                                             'video' && (
                                                                             <div className="grid gap-4 md:grid-cols-2">
+                                                                                <div className="md:col-span-2">
+                                                                                    <PortalReferenceControl
+                                                                                        linkedTitle={String(
+                                                                                            block.portal_resource_title ??
+                                                                                                '',
+                                                                                        )}
+                                                                                        onChoose={() =>
+                                                                                            openPortalResourcePicker(
+                                                                                                block,
+                                                                                                'video',
+                                                                                            )
+                                                                                        }
+                                                                                        onUnlink={() =>
+                                                                                            removePortalResourceReference(
+                                                                                                block.id,
+                                                                                            )
+                                                                                        }
+                                                                                    />
+                                                                                </div>
                                                                                 <div className="grid gap-2 md:col-span-2">
                                                                                     <Label>
                                                                                         Video
@@ -5164,7 +5533,9 @@ function CourseBuilderPage({
                                                                                                 (
                                                                                                     current,
                                                                                                 ) => ({
-                                                                                                    ...current,
+                                                                                                    ...clearPortalReference(
+                                                                                                        current,
+                                                                                                    ),
                                                                                                     url: event
                                                                                                         .target
                                                                                                         .value,
@@ -5282,6 +5653,25 @@ function CourseBuilderPage({
                                                                         {block.type ===
                                                                             'document' && (
                                                                             <div className="grid gap-4 md:grid-cols-2">
+                                                                                <div className="md:col-span-2">
+                                                                                    <PortalReferenceControl
+                                                                                        linkedTitle={String(
+                                                                                            block.portal_resource_title ??
+                                                                                                '',
+                                                                                        )}
+                                                                                        onChoose={() =>
+                                                                                            openPortalResourcePicker(
+                                                                                                block,
+                                                                                                'document',
+                                                                                            )
+                                                                                        }
+                                                                                        onUnlink={() =>
+                                                                                            removePortalResourceReference(
+                                                                                                block.id,
+                                                                                            )
+                                                                                        }
+                                                                                    />
+                                                                                </div>
                                                                                 <div className="grid gap-2">
                                                                                     <Label>
                                                                                         Document
@@ -5401,7 +5791,9 @@ function CourseBuilderPage({
                                                                                                 (
                                                                                                     current,
                                                                                                 ) => ({
-                                                                                                    ...current,
+                                                                                                    ...clearPortalReference(
+                                                                                                        current,
+                                                                                                    ),
                                                                                                     url: event
                                                                                                         .target
                                                                                                         .value,
@@ -6532,6 +6924,125 @@ function CourseBuilderPage({
             </main>
 
             <Dialog
+                open={portalPickerTarget !== null}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setPortalPickerTarget(null);
+                        setPortalResourceSearch('');
+                    }
+                }}
+            >
+                <DialogContent className="max-h-[85vh] overflow-hidden sm:max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle>Choose from Resource Portal</DialogTitle>
+                        <DialogDescription>
+                            Select an approved{' '}
+                            {portalPickerTarget?.mediaKind === 'image'
+                                ? 'image'
+                                : portalPickerTarget?.mediaKind === 'video'
+                                  ? 'video'
+                                  : 'file or external resource'}
+                            . This lesson will reference the selected version.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="relative">
+                        <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                            value={portalResourceSearch}
+                            onChange={(event) =>
+                                setPortalResourceSearch(event.target.value)
+                            }
+                            className="pl-9"
+                            placeholder="Search resources by title, category, or tag..."
+                            aria-label="Search Resource Portal"
+                        />
+                    </div>
+
+                    <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
+                        {compatiblePortalResources.length === 0 ? (
+                            <div className="rounded-2xl border border-dashed p-8 text-center">
+                                <BookOpen className="mx-auto size-7 text-muted-foreground" />
+                                <p className="mt-3 font-semibold">
+                                    No compatible resources found
+                                </p>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                    {portalResourceSearch.trim()
+                                        ? 'Try a different search, or clear the search to see every compatible resource.'
+                                        : 'Add this file to the Resource Portal first, then return here to reference it.'}
+                                </p>
+                            </div>
+                        ) : (
+                            compatiblePortalResources.map((resource) => (
+                                <button
+                                    key={resource.id}
+                                    type="button"
+                                    onClick={() =>
+                                        applyPortalResource(resource)
+                                    }
+                                    className="flex w-full items-center gap-4 rounded-2xl border p-3 text-left transition-colors hover:border-emerald-300 hover:bg-emerald-50/50 focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:outline-none"
+                                >
+                                    {resource.media_kind === 'image' ? (
+                                        <img
+                                            src={resource.url}
+                                            alt=""
+                                            className="size-14 shrink-0 rounded-xl border bg-muted object-cover"
+                                        />
+                                    ) : (
+                                        <span className="flex size-14 shrink-0 items-center justify-center rounded-xl bg-slate-950 text-white">
+                                            {resource.media_kind === 'video' ? (
+                                                <Video className="size-5" />
+                                            ) : (
+                                                <FileText className="size-5" />
+                                            )}
+                                        </span>
+                                    )}
+                                    <span className="min-w-0 flex-1">
+                                        <span className="flex flex-wrap items-center gap-2">
+                                            <span className="truncate font-semibold">
+                                                {resource.title}
+                                            </span>
+                                            {resource.featured && (
+                                                <Badge variant="secondary">
+                                                    Featured
+                                                </Badge>
+                                            )}
+                                        </span>
+                                        <span className="mt-1 block truncate text-sm text-muted-foreground">
+                                            {resource.category ||
+                                                resource.original_name ||
+                                                'Organization resource'}
+                                            {resource.version_number
+                                                ? ` · Version ${resource.version_number}`
+                                                : ''}
+                                        </span>
+                                        {resource.description && (
+                                            <span className="mt-1 line-clamp-1 block text-xs text-muted-foreground">
+                                                {resource.description}
+                                            </span>
+                                        )}
+                                    </span>
+                                    <span className="text-xs font-semibold text-emerald-700">
+                                        Select
+                                    </span>
+                                </button>
+                            ))
+                        )}
+                    </div>
+
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setPortalPickerTarget(null)}
+                        >
+                            Cancel
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog
                 open={activityPickerOpen}
                 onOpenChange={(open) => {
                     setActivityPickerOpen(open);
@@ -6686,6 +7197,137 @@ function CourseBuilderPage({
                             );
                         })}
                     </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={courseReviewOpen} onOpenChange={setCourseReviewOpen}>
+                <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>
+                            {latest_review
+                                ? 'Send a new revision for review'
+                                : 'Send course for review'}
+                        </DialogTitle>
+                        <DialogDescription>
+                            We will save your changes and create a frozen copy
+                            for the reviewer. Later edits will require a new
+                            approval.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    {reviewers.length === 0 ? (
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+                            Add another organization admin or manager before
+                            sending this course for review. Course authors
+                            cannot approve their own work.
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            <div className="grid gap-2">
+                                <Label htmlFor="course-reviewer">
+                                    Reviewer
+                                </Label>
+                                <select
+                                    id="course-reviewer"
+                                    value={courseReviewDraft.reviewerId}
+                                    onChange={(event) =>
+                                        setCourseReviewDraft((current) => ({
+                                            ...current,
+                                            reviewerId: event.target.value,
+                                        }))
+                                    }
+                                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                >
+                                    <option value="">Choose a reviewer</option>
+                                    {reviewers.map((reviewer) => (
+                                        <option
+                                            key={reviewer.id}
+                                            value={reviewer.id}
+                                        >
+                                            {reviewer.name} ({reviewer.email})
+                                        </option>
+                                    ))}
+                                </select>
+                                <InputError
+                                    message={courseReviewErrors.reviewer_id}
+                                />
+                            </div>
+
+                            <div className="grid gap-2">
+                                <Label htmlFor="course-review-due">
+                                    Review due date{' '}
+                                    <span className="text-muted-foreground">
+                                        (optional)
+                                    </span>
+                                </Label>
+                                <Input
+                                    id="course-review-due"
+                                    type="date"
+                                    value={courseReviewDraft.dueAt}
+                                    onChange={(event) =>
+                                        setCourseReviewDraft((current) => ({
+                                            ...current,
+                                            dueAt: event.target.value,
+                                        }))
+                                    }
+                                />
+                                <InputError
+                                    message={courseReviewErrors.due_at}
+                                />
+                            </div>
+
+                            <div className="grid gap-2">
+                                <Label htmlFor="course-review-note">
+                                    Note to reviewer{' '}
+                                    <span className="text-muted-foreground">
+                                        (optional)
+                                    </span>
+                                </Label>
+                                <textarea
+                                    id="course-review-note"
+                                    value={courseReviewDraft.note}
+                                    onChange={(event) =>
+                                        setCourseReviewDraft((current) => ({
+                                            ...current,
+                                            note: event.target.value,
+                                        }))
+                                    }
+                                    rows={4}
+                                    placeholder="Call out anything that needs special attention..."
+                                    className="min-h-28 w-full rounded-xl border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                />
+                                <InputError message={courseReviewErrors.note} />
+                            </div>
+                        </div>
+                    )}
+
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setCourseReviewOpen(false)}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={sendCourseForReview}
+                            disabled={
+                                reviewers.length === 0 ||
+                                courseReviewSaving ||
+                                saveState === 'saving'
+                            }
+                        >
+                            {courseReviewSaving || saveState === 'saving' ? (
+                                <Spinner />
+                            ) : (
+                                <Send className="size-4" />
+                            )}
+                            {hasUnsavedChanges
+                                ? 'Save and send'
+                                : 'Send for review'}
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
 
@@ -6910,6 +7552,19 @@ function CourseBuilderPage({
                             <AlertTriangle className="mt-0.5 size-4 shrink-0" />
                             Add at least one question to the final assessment
                             before publishing.
+                        </div>
+                    )}
+                    {reviewBlocksPublishing && latest_review && (
+                        <div className="flex gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+                            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                            <span>
+                                {latest_review.status === 'in_review'
+                                    ? 'This revision is still awaiting reviewer approval.'
+                                    : latest_review.status ===
+                                        'changes_requested'
+                                      ? 'The reviewer requested changes. Save your updates and submit a new revision.'
+                                      : 'The course changed after approval. Save and submit the latest revision for review.'}
+                            </span>
                         </div>
                     )}
                     <DialogFooter>

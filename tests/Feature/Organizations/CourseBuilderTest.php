@@ -6,6 +6,8 @@ use App\Models\CourseAssignment;
 use App\Models\Lesson;
 use App\Models\LessonCompletion;
 use App\Models\Organization;
+use App\Models\OrganizationResource;
+use App\Models\OrganizationResourceVersion;
 use App\Models\Team;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -85,6 +87,30 @@ test('organization admins can open the course builder and save block-based lesso
         'status' => 'draft',
         'published_at' => null,
     ]);
+    $portalResource = OrganizationResource::create([
+        'organization_id' => $organization->id,
+        'created_by_id' => $admin->id,
+        'updated_by_id' => $admin->id,
+        'resource_type' => 'file',
+        'title' => 'PPE fitting diagram',
+        'category' => 'Safety',
+        'tags' => ['ppe', 'diagram'],
+        'featured' => true,
+        'status' => 'active',
+        'current_version' => 1,
+        'published_at' => now(),
+    ]);
+    $portalVersion = OrganizationResourceVersion::create([
+        'organization_resource_id' => $portalResource->id,
+        'uploaded_by_id' => $admin->id,
+        'version_number' => 1,
+        'disk' => 'cloudinary',
+        'path' => 'assets/organizations/1/resources/1/v1',
+        'url' => 'https://res.cloudinary.com/demo/image/upload/ppe-diagram.png',
+        'original_name' => 'ppe-diagram.png',
+        'mime_type' => 'image/png',
+        'size_bytes' => 2048,
+    ]);
 
     $this->actingAs($admin)
         ->get(route('organizations.courses.show', [
@@ -104,6 +130,9 @@ test('organization admins can open the course builder and save block-based lesso
             ->where('selected_assignment_due_at', now()->addDays(7)->toDateString())
             ->where('course.content_type', 'course')
             ->where('course.subject', 'Warehouse Safety')
+            ->where('resource_library.0.id', $portalResource->id)
+            ->where('resource_library.0.version_id', $portalVersion->id)
+            ->where('resource_library.0.media_kind', 'image')
             ->has('lessons', 2));
 
     $this->actingAs($admin)
@@ -142,6 +171,16 @@ test('organization admins can open the course builder and save block-based lesso
                     'rich_text' => '<h1>Required PPE</h1><p>Wear the <strong>right PPE</strong> before starting.</p>',
                 ],
                 [
+                    'id' => 'block_image',
+                    'type' => 'image',
+                    'url' => $portalVersion->url,
+                    'alt' => 'PPE fitting diagram',
+                    'portal_resource_id' => $portalResource->id,
+                    'portal_resource_version_id' => $portalVersion->id,
+                    'portal_resource_version_number' => 1,
+                    'portal_resource_title' => $portalResource->title,
+                ],
+                [
                     'id' => 'block_callout',
                     'type' => 'callout',
                     'style' => 'warning',
@@ -163,8 +202,10 @@ test('organization admins can open the course builder and save block-based lesso
 
     $lesson->refresh();
 
-    expect($lesson->content)->toHaveCount(3);
+    expect($lesson->content)->toHaveCount(4);
     expect($lesson->content[0]['rich_text'])->toContain('<strong>right PPE</strong>');
+    expect($lesson->content[1]['portal_resource_id'])->toBe($portalResource->id);
+    expect($lesson->content[1]['portal_resource_version_id'])->toBe($portalVersion->id);
     expect($lesson->body)->toContain('Wear the right PPE before starting.');
     expect($lesson->body)->toContain('Stop work if protective equipment is damaged.');
     expect($lesson->body)->toContain('Which item is required?');

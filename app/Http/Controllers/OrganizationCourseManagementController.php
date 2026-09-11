@@ -8,13 +8,16 @@ use App\Models\Course;
 use App\Models\CourseAsset;
 use App\Models\CourseAssignment;
 use App\Models\CourseProgress;
+use App\Models\CourseReview;
 use App\Models\JobTitle;
 use App\Models\Lesson;
 use App\Models\Location;
 use App\Models\Organization;
+use App\Models\OrganizationResource;
 use App\Models\Team;
 use App\Models\User;
 use App\Services\CoursePublishingService;
+use App\Services\CourseReviewSnapshot;
 use App\Services\MicrolearningStarterTemplate;
 use App\Services\PathwayAssignmentService;
 use Carbon\CarbonImmutable;
@@ -201,6 +204,58 @@ class OrganizationCourseManagementController extends Controller
             ? 'full'
             : 'current';
         $starterTemplate = app(MicrolearningStarterTemplate::class);
+        $reviewSnapshots = app(CourseReviewSnapshot::class);
+        $latestReview = $course->reviews()
+            ->with(['submitter', 'reviewer'])
+            ->withCount('comments')
+            ->first();
+        $resourceLibrary = $organization->resources()
+            ->with('latestVersion')
+            ->where('status', 'active')
+            ->whereNull('archived_at')
+            ->orderByDesc('featured')
+            ->orderBy('title')
+            ->get()
+            ->map(function (OrganizationResource $resource): ?array {
+                $version = $resource->latestVersion;
+                $url = match ($resource->resource_type) {
+                    'video' => $version?->url ?: $resource->video_url,
+                    'external_link' => $resource->external_url,
+                    'file' => $version?->url,
+                    default => null,
+                };
+
+                if (blank($url)) {
+                    return null;
+                }
+
+                $mimeType = $version?->mime_type;
+                $mediaKind = match (true) {
+                    str_starts_with((string) $mimeType, 'image/') => 'image',
+                    $resource->resource_type === 'video',
+                    str_starts_with((string) $mimeType, 'video/') => 'video',
+                    default => 'document',
+                };
+
+                return [
+                    'id' => $resource->id,
+                    'title' => $resource->title,
+                    'description' => $resource->description,
+                    'category' => $resource->category,
+                    'tags' => array_values($resource->tags ?? []),
+                    'resource_type' => $resource->resource_type,
+                    'media_kind' => $mediaKind,
+                    'url' => $url,
+                    'mime_type' => $mimeType,
+                    'featured' => $resource->featured,
+                    'version_id' => $version?->id,
+                    'version_number' => $version?->version_number,
+                    'original_name' => $version?->original_name,
+                    'updated_at' => $resource->updated_at?->toIso8601String(),
+                ];
+            })
+            ->filter()
+            ->values();
 
         return Inertia::render('organizations/courses/show', [
             'organization' => $organization->only(['id', 'name', 'slug']),
@@ -218,6 +273,32 @@ class OrganizationCourseManagementController extends Controller
                 'location_id' => $user->location_id,
                 'team_ids' => $user->teams->pluck('id')->values()->all(),
             ])->values(),
+            'reviewers' => $organizationUsers
+                ->filter(fn (User $candidate): bool => $candidate->getKey() !== $request->user()->getKey()
+                    && $candidate->canReviewTraining($organization)
+                    && $candidate->canLogin())
+                ->map(fn (User $candidate): array => [
+                    'id' => $candidate->id,
+                    'name' => $candidate->name,
+                    'email' => $candidate->email,
+                    'role' => $candidate->organization_role?->value,
+                ])
+                ->values(),
+            'latest_review' => $latestReview === null ? null : [
+                'id' => $latestReview->id,
+                'revision_number' => $latestReview->revision_number,
+                'status' => $latestReview->status,
+                'status_label' => $latestReview->statusLabel(),
+                'content_matches' => $reviewSnapshots->hashCourse($course) === $latestReview->content_hash,
+                'due_at' => $latestReview->due_at?->toDateString(),
+                'submitted_at' => $latestReview->submitted_at?->toIso8601String(),
+                'decided_at' => $latestReview->decided_at?->toIso8601String(),
+                'comments_count' => $latestReview->comments_count,
+                'reviewer' => $latestReview->reviewer?->only(['id', 'name', 'email']),
+                'submitter' => $latestReview->submitter?->only(['id', 'name', 'email']),
+                'url' => route('organizations.course-reviews.show', [$organization, $latestReview]),
+            ],
+            'resource_library' => $resourceLibrary,
             'course' => [
                 ...$this->coursePayload($course, null, [], $assetUsageCounts, $assetUsageDetails),
                 'subject' => $course->subject,
@@ -400,6 +481,7 @@ class OrganizationCourseManagementController extends Controller
         Course $course,
         PathwayAssignmentService $pathwayAssignments,
         CoursePublishingService $coursePublishing,
+        CourseReviewSnapshot $reviewSnapshots,
     ): RedirectResponse {
         $user = $request->user()->loadMissing('organization');
         $this->assertCanAuthorTraining($user, $organization);
@@ -505,6 +587,23 @@ class OrganizationCourseManagementController extends Controller
             $course->status === 'published' &&
             array_key_exists('published_lesson_ids', $validated)
         ) {
+            $latestReview = $course->reviews()->first();
+
+            if ($latestReview !== null && $latestReview->status !== CourseReview::STATUS_APPROVED) {
+                throw ValidationException::withMessages([
+                    'published_lesson_ids' => 'The latest course review must be approved before publishing.',
+                ]);
+            }
+
+            if (
+                $latestReview !== null &&
+                $reviewSnapshots->hashCourse($course) !== $latestReview->content_hash
+            ) {
+                throw ValidationException::withMessages([
+                    'published_lesson_ids' => 'The course changed after review. Send the latest version for review before publishing.',
+                ]);
+            }
+
             $finalAssessment = $course->lessons()
                 ->where('is_final_assessment', true)
                 ->first();

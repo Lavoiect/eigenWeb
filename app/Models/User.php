@@ -199,6 +199,12 @@ class User extends Authenticatable
         return $this->canManageOrganizationSettings($organization);
     }
 
+    public function canReviewTraining(?Organization $organization = null): bool
+    {
+        return $this->canAccessOrganization($organization)
+            && ($this->isSuperAdmin() || $this->isOrganizationAdmin() || $this->isManager());
+    }
+
     public function canAssignTraining(Organization|Team|null $scope = null): bool
     {
         if ($this->isSuperAdmin() || $this->isOrganizationAdmin()) {
