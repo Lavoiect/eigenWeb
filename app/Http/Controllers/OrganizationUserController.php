@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\OrganizationRole;
 use App\Http\Controllers\Api\V1\Concerns\FormatsLearningApiResponses;
+use App\Models\Course;
 use App\Models\CourseAssignment;
 use App\Models\CourseProgress;
 use App\Models\JobTitle;
@@ -26,6 +27,7 @@ use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class OrganizationUserController extends Controller
@@ -180,8 +182,42 @@ class OrganizationUserController extends Controller
         return Inertia::render('organizations/users/transcript', [
             'organization' => $organization->only(['id', 'name', 'slug']),
             'user' => $this->userRow($user, $request->user()),
-            'transcript' => $this->transcriptPayload($user),
+            'training' => $this->trainingRecordsPayload($user, $organization),
             'pathway_progress' => $this->pathwayProgressSummary($user),
+        ]);
+    }
+
+    public function certificate(
+        Request $request,
+        Organization $organization,
+        User $user,
+        Course $course,
+    ): HttpResponse {
+        $this->authorize('manageUsers', $organization);
+
+        abort_unless($user->organization_id === $organization->getKey(), 404);
+        abort_unless($course->organization_id === $organization->getKey(), 404);
+
+        $progress = CourseProgress::query()
+            ->where('user_id', $user->getKey())
+            ->where('course_id', $course->getKey())
+            ->where(function ($query): void {
+                $query->where('status', 'completed')
+                    ->orWhereNotNull('completed_at');
+            })
+            ->firstOrFail();
+
+        $fileName = sprintf(
+            '%s-%s-certificate.svg',
+            Str::slug($user->name),
+            Str::slug($course->title),
+        );
+        $disposition = $request->boolean('download') ? 'attachment' : 'inline';
+
+        return response($this->certificateSvg($organization, $user, $course, $progress), 200, [
+            'Content-Type' => 'image/svg+xml; charset=UTF-8',
+            'Content-Disposition' => sprintf('%s; filename="%s"', $disposition, $fileName),
+            'X-Content-Type-Options' => 'nosniff',
         ]);
     }
 
@@ -974,17 +1010,319 @@ class OrganizationUserController extends Controller
 
         return [
             'summary' => $summary,
-            'records' => $records->map(fn (CourseProgress $progress): array => [
-                'id' => $progress->id,
-                'course' => $this->coursePayload($progress->course, $progress),
-                'progress' => $this->progressPayload($progress),
-                'last_completed_lesson' => $progress->lastCompletedLesson?->only([
-                    'id',
-                    'title',
-                    'slug',
-                ]),
-            ])->values(),
+            'records' => $records->map(function (CourseProgress $progress): array {
+                $course = $progress->course;
+
+                if (! $course instanceof Course) {
+                    throw new \LogicException('Course progress is missing its course.');
+                }
+
+                return [
+                    'id' => $progress->id,
+                    'course' => $this->coursePayload($course, $progress),
+                    'progress' => $this->progressPayload($progress),
+                    'last_completed_lesson' => $progress->lastCompletedLesson?->only([
+                        'id',
+                        'title',
+                        'slug',
+                    ]),
+                ];
+            })->values(),
         ];
+    }
+
+    /**
+     * Build the employee's complete training picture, including courses that
+     * have been assigned but do not yet have a progress record.
+     *
+     * @return array<string, mixed>
+     */
+    private function trainingRecordsPayload(User $user, Organization $organization): array
+    {
+        $user->loadMissing(['teams', 'jobTitle', 'location']);
+
+        $teamIds = $user->teams->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        $jobTitleId = $user->job_title_id;
+        $locationId = $user->location_id;
+
+        $assignments = CourseAssignment::query()
+            ->with([
+                'course' => fn ($query) => $query->withCount('lessons'),
+            ])
+            ->whereHas('course', fn ($query) => $query->where('organization_id', $organization->getKey()))
+            ->where(function ($query) use ($user, $teamIds, $jobTitleId, $locationId): void {
+                $query->where('assigned_to_user_id', $user->getKey());
+
+                if ($teamIds !== []) {
+                    $query->orWhereIn('assigned_to_team_id', $teamIds);
+                }
+
+                if ($jobTitleId !== null) {
+                    $query->orWhere('assigned_to_job_title_id', $jobTitleId);
+                }
+
+                if ($locationId !== null) {
+                    $query->orWhere('assigned_to_location_id', $locationId);
+                }
+            })
+            ->get();
+
+        $progresses = CourseProgress::query()
+            ->with([
+                'course' => fn ($query) => $query->withCount('lessons'),
+                'lastCompletedLesson',
+            ])
+            ->where('user_id', $user->getKey())
+            ->whereHas('course', fn ($query) => $query->where('organization_id', $organization->getKey()))
+            ->get()
+            ->keyBy('course_id');
+
+        $records = $assignments
+            ->groupBy('course_id')
+            ->map(function (Collection $courseAssignments, int $courseId) use ($progresses, $organization, $user): array {
+                $firstAssignment = $courseAssignments->first();
+                $course = $firstAssignment?->course;
+
+                if (! $firstAssignment instanceof CourseAssignment || ! $course instanceof Course) {
+                    throw new \LogicException('Course assignment is missing its course.');
+                }
+
+                return $this->trainingRecordPayload(
+                    $organization,
+                    $user,
+                    $course,
+                    $progresses->get($courseId),
+                    $courseAssignments,
+                );
+            })
+            ->values();
+
+        $progresses
+            ->filter(function (CourseProgress $progress) use ($records): bool {
+                $isCompleted = $progress->status === 'completed' || $progress->completed_at !== null;
+
+                return $isCompleted
+                    && ! $records->contains(fn (array $record): bool => $record['course']['id'] === $progress->course_id);
+            })
+            ->each(function (CourseProgress $progress) use ($organization, $records, $user): void {
+                $course = $progress->course;
+
+                if (! $course instanceof Course) {
+                    throw new \LogicException('Course progress is missing its course.');
+                }
+
+                $records->push($this->trainingRecordPayload(
+                    $organization,
+                    $user,
+                    $course,
+                    $progress,
+                    collect(),
+                ));
+            });
+
+        $completed = $records
+            ->where('status', 'completed')
+            ->sortByDesc('completed_at')
+            ->values();
+        $overdue = $records
+            ->where('status', 'overdue')
+            ->sortBy('due_at')
+            ->values();
+        $assigned = $records
+            ->whereIn('status', ['assigned', 'in_progress'])
+            ->sortBy(fn (array $record): string => $record['due_at'] ?? '9999-12-31T23:59:59Z')
+            ->values();
+        $completedScores = $completed
+            ->pluck('progress.score_percent')
+            ->filter(fn ($score) => $score !== null);
+
+        return [
+            'summary' => [
+                'completed_courses' => $completed->count(),
+                'assigned_courses' => $assigned->count(),
+                'overdue_courses' => $overdue->count(),
+                'average_score_percent' => $completedScores->isEmpty()
+                    ? null
+                    : (int) round($completedScores->avg()),
+            ],
+            'completed' => $completed,
+            'assigned' => $assigned,
+            'overdue' => $overdue,
+        ];
+    }
+
+    /**
+     * @param  Collection<int, CourseAssignment>  $assignments
+     * @return array<string, mixed>
+     */
+    private function trainingRecordPayload(
+        Organization $organization,
+        User $user,
+        Course $course,
+        ?CourseProgress $progress,
+        Collection $assignments,
+    ): array {
+        $isCompleted = $progress !== null
+            && ($progress->status === 'completed' || $progress->completed_at !== null);
+        $dueAt = $assignments
+            ->filter(fn (CourseAssignment $assignment): bool => $assignment->due_at !== null)
+            ->sortBy(fn (CourseAssignment $assignment): int => $assignment->due_at?->timestamp ?? PHP_INT_MAX)
+            ->first()
+            ?->due_at;
+        $isOverdue = ! $isCompleted && $dueAt?->isPast() === true;
+        $status = match (true) {
+            $isCompleted => 'completed',
+            $isOverdue => 'overdue',
+            $progress !== null && $progress->progress_percent > 0 => 'in_progress',
+            default => 'assigned',
+        };
+        $sourceLabels = $assignments
+            ->map(fn (CourseAssignment $assignment): string => match ($assignment->sourceType()) {
+                'team' => 'Team',
+                'job_title' => 'Job title',
+                'location' => 'Location',
+                'pathway' => 'Pathway',
+                default => 'Direct',
+            })
+            ->unique()
+            ->values();
+        $certificateParameters = [
+            'organization' => $organization,
+            'user' => $user,
+            'course' => $course,
+        ];
+
+        return [
+            'id' => $course->id,
+            'course' => [
+                'id' => $course->id,
+                'title' => $course->title,
+                'slug' => $course->slug,
+                'subject' => $course->subject,
+                'lesson_count' => (int) ($course->getAttribute('lessons_count') ?? 0),
+                'estimated_minutes' => $course->estimated_minutes,
+                'passing_score' => $course->passing_score,
+            ],
+            'status' => $status,
+            'status_label' => match ($status) {
+                'completed' => 'Completed',
+                'overdue' => 'Overdue',
+                'in_progress' => 'In progress',
+                default => 'Assigned',
+            },
+            'due_at' => $dueAt?->toIso8601String(),
+            'assigned_at' => $assignments
+                ->sortBy('created_at')
+                ->first()
+                ?->created_at
+                ?->toIso8601String(),
+            'is_required' => $assignments->contains(
+                fn (CourseAssignment $assignment): bool => $assignment->is_required,
+            ),
+            'assignment_sources' => $sourceLabels,
+            'progress' => $progress ? $this->progressPayload($progress) : null,
+            'last_completed_lesson' => $progress?->lastCompletedLesson?->only([
+                'id',
+                'title',
+                'slug',
+            ]),
+            'completed_at' => $progress?->completed_at?->toIso8601String(),
+            'certificate' => $isCompleted
+                ? [
+                    'view_url' => route('organizations.users.certificate', $certificateParameters),
+                    'download_url' => route('organizations.users.certificate', [
+                        ...$certificateParameters,
+                        'download' => 1,
+                    ]),
+                ]
+                : null,
+        ];
+    }
+
+    private function certificateSvg(
+        Organization $organization,
+        User $user,
+        Course $course,
+        CourseProgress $progress,
+    ): string {
+        $completedAt = $progress->completed_at ?? $progress->updated_at;
+        $completedDate = $completedAt?->format('F j, Y') ?? 'Completion date unavailable';
+        $score = $progress->score_percent !== null
+            ? sprintf('Final score: %d%%', $progress->score_percent)
+            : 'Course requirements completed';
+        $certificateId = strtoupper(substr(hash(
+            'sha256',
+            implode(':', [
+                $organization->getKey(),
+                $user->getKey(),
+                $course->getKey(),
+                $completedAt?->toIso8601String(),
+            ]),
+        ), 0, 12));
+        $courseLines = $this->certificateTextLines($course->title);
+        $courseTitle = collect($courseLines)
+            ->map(fn (string $line, int $index): string => sprintf(
+                '<tspan x="700" dy="%s">%s</tspan>',
+                $index === 0 ? '0' : '56',
+                $this->escapeCertificateText($line),
+            ))
+            ->implode('');
+        $courseTitleY = count($courseLines) > 1 ? 525 : 555;
+        $logoPath = public_path('eigen_logo.png');
+        $logo = is_file($logoPath)
+            ? 'data:image/png;base64,'.base64_encode((string) file_get_contents($logoPath))
+            : '';
+        $logoImage = $logo !== ''
+            ? sprintf('<image href="%s" x="650" y="92" width="100" height="100" />', $logo)
+            : '';
+
+        $employeeName = $this->escapeCertificateText($user->name);
+        $organizationName = $this->escapeCertificateText($organization->name);
+        $courseDescription = $this->escapeCertificateText($course->title);
+        $completionText = $this->escapeCertificateText($completedDate);
+        $scoreText = $this->escapeCertificateText($score);
+
+        return <<<SVG
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1000" viewBox="0 0 1400 1000" role="img" aria-labelledby="title description">
+  <title id="title">Course completion certificate for {$employeeName}</title>
+  <desc id="description">{$employeeName} completed {$courseDescription} on {$completionText}.</desc>
+  <rect width="1400" height="1000" fill="#07120f"/>
+  <rect x="34" y="34" width="1332" height="932" rx="28" fill="#f7faf5" stroke="#c8ef58" stroke-width="4"/>
+  <path d="M34 210 C320 90 500 230 760 118 C1000 14 1190 78 1366 176 L1366 34 L34 34 Z" fill="#0d2b23"/>
+  <path d="M34 820 C300 938 510 830 748 904 C1010 985 1200 888 1366 812 L1366 966 L34 966 Z" fill="#e7f5d6"/>
+  {$logoImage}
+  <text x="700" y="225" text-anchor="middle" fill="#0b2b22" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="700" letter-spacing="7">EIGEN LEARNING</text>
+  <text x="700" y="305" text-anchor="middle" fill="#527067" font-family="Arial, Helvetica, sans-serif" font-size="23" letter-spacing="8">CERTIFICATE OF COMPLETION</text>
+  <line x1="470" y1="342" x2="930" y2="342" stroke="#c8ef58" stroke-width="5"/>
+  <text x="700" y="410" text-anchor="middle" fill="#6a7d76" font-family="Arial, Helvetica, sans-serif" font-size="22">This certifies that</text>
+  <text x="700" y="472" text-anchor="middle" fill="#07120f" font-family="Arial, Helvetica, sans-serif" font-size="48" font-weight="700">{$employeeName}</text>
+  <text x="700" y="{$courseTitleY}" text-anchor="middle" fill="#0d5947" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="700">{$courseTitle}</text>
+  <text x="700" y="690" text-anchor="middle" fill="#527067" font-family="Arial, Helvetica, sans-serif" font-size="22">Completed on {$completionText}</text>
+  <text x="700" y="730" text-anchor="middle" fill="#527067" font-family="Arial, Helvetica, sans-serif" font-size="20">{$scoreText}</text>
+  <line x1="170" y1="814" x2="510" y2="814" stroke="#8aa198" stroke-width="2"/>
+  <text x="340" y="850" text-anchor="middle" fill="#294b41" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="700">{$organizationName}</text>
+  <text x="340" y="882" text-anchor="middle" fill="#71857d" font-family="Arial, Helvetica, sans-serif" font-size="16">Organization</text>
+  <line x1="890" y1="814" x2="1230" y2="814" stroke="#8aa198" stroke-width="2"/>
+  <text x="1060" y="850" text-anchor="middle" fill="#294b41" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="700">ID {$certificateId}</text>
+  <text x="1060" y="882" text-anchor="middle" fill="#71857d" font-family="Arial, Helvetica, sans-serif" font-size="16">Certificate record</text>
+</svg>
+SVG;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function certificateTextLines(string $value): array
+    {
+        $limited = Str::limit(trim($value), 76);
+        $lines = explode("\n", wordwrap($limited, 38, "\n", true));
+
+        return array_slice($lines, 0, 2);
+    }
+
+    private function escapeCertificateText(string $value): string
+    {
+        return htmlspecialchars($value, ENT_QUOTES | ENT_XML1, 'UTF-8');
     }
 
     private function averageScore(Collection $records): ?int

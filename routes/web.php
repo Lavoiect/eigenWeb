@@ -57,6 +57,9 @@ Route::middleware(['auth', 'verified', 'password.changed'])->group(function () {
             Route::get('users/{user}/transcript', [OrganizationUserController::class, 'transcript'])
                 ->whereNumber('user')
                 ->name('organizations.users.transcript');
+            Route::get('users/{user}/transcript/{course}/certificate', [OrganizationUserController::class, 'certificate'])
+                ->whereNumber(['user', 'course'])
+                ->name('organizations.users.certificate');
             Route::patch('users/{user}/role', [OrganizationUserController::class, 'updateRole'])
                 ->whereNumber('user')
                 ->name('organizations.users.update-role');

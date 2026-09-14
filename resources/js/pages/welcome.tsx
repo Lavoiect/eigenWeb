@@ -16,32 +16,32 @@ import { useEffect, useState } from 'react';
 const demoUrl = 'https://calendly.com/lavoiect/30min';
 
 const services = [
-    'Turn your procedures and expertise into clear, practical training',
-    'Build courses, assessments, pathways, and mobile resources for you',
-    'Organize learners, assignments, reporting, and ongoing updates',
-    'Keep the LMS useful as your roles, teams, and procedures change',
+    'Is this employee ready to work independently?',
+    'Do they understand the correct procedure?',
+    'Can they find the right answer while they’re in the field?',
+    'Can we prove they completed and understood their training?',
 ];
 
 const processSteps = [
     {
-        title: 'We learn your operation',
+        title: 'Show us the problem',
         description:
-            'You bring the procedures, goals, and subject-matter expertise. We identify what each role needs to know and do.',
+            'Choose the role, team, or procedure creating the greatest risk or inconsistency.',
     },
     {
-        title: 'We build the experience',
+        title: 'Bring us what you have',
         description:
-            'Eigen turns that knowledge into courses, microlearning, assessments, pathways, and mobile-ready resources.',
+            'Share your manuals, SOPs, videos, checklists, and subject-matter experts.',
     },
     {
-        title: 'Your team trains anywhere',
+        title: 'We build the pilot',
         description:
-            'Employees sign in, complete assigned training, find procedures, and pick up where they left off from their phone.',
+            'Eigen creates and launches a focused mobile training experience.',
     },
     {
-        title: 'We help keep it working',
+        title: 'You measure readiness',
         description:
-            'Managers get clear reporting while Eigen helps maintain the platform and improve training over time.',
+            'Track participation, performance, knowledge gaps, and field-resource usage.',
     },
 ];
 
@@ -234,18 +234,14 @@ export default function Welcome() {
                                         className="eyebrow-dot"
                                         aria-hidden="true"
                                     />
-                                    Mobile-first workforce learning
+                                    Mobile training for field and frontline teams
                                 </p>
                                 <h1 className="hero-title">
-                                    Your training team,{' '}
-                                    <em>without building one.</em>
+                                    Know they’re ready{' '}before they’re in <em> the field.</em>
+                                    
                                 </h1>
                                 <p className="hero-lede">
-                                    Eigen combines a mobile-first LMS with the
-                                    people to build your training and manage the
-                                    platform. Your workforce gets the knowledge
-                                    it needs, without requiring an in-house
-                                    training department.
+                                    Eigen turns your procedures and expert knowledge into mobile training, assessments, and searchable job aids—so employees know what to do, managers can see where gaps exist, and preventable mistakes don’t become expensive problems.
                                 </p>
 
                                 <div className="hero-ctas">
@@ -268,9 +264,9 @@ export default function Welcome() {
 
                                 <ul className="hero-checklist" role="list">
                                     {[
-                                        'LMS setup',
-                                        'Custom course creation',
-                                        'Ongoing management',
+                                        'Faster onboarding',
+                                        'Consistent procedures',
+                                        'Clear readiness reporting',
                                     ].map((item) => (
                                         <li key={item}>
                                             <Check aria-hidden="true" />
@@ -287,21 +283,21 @@ export default function Welcome() {
                             <div className="value-head reveal">
                                 <div>
                                     <p className="eyebrow eyebrow-light">
-                                        More than software
+                                        The training gap
                                     </p>
                                     <h2 className="value-title">
-                                        The LMS is only useful{' '}
-                                        <em>when the training is useful.</em>
+                                        You shouldn’t discover a training gap <em>after something goes wrong.</em>
+                                        
                                     </h2>
                                 </div>
                                 <p className="value-lede">
-                                    Most platforms give you tools and leave the
-                                    rest to your team. Eigen can create the
-                                    training, structure the learning program,
-                                    and help run the system alongside you.
+                                    Employees are often sent into the field after reading a manual, shadowing another employee, or receiving inconsistent instruction from different supervisors. The weakness only becomes visible after a safety incident, repeat service call, damaged equipment, or customer complaint.
+                                    
                                 </p>
                             </div>
-
+                            <p className="eyebrow eyebrow-light pb-3">
+                                    CAN YOUR MANAGERS CONFIDENTLY ANSWER?
+                            </p>
                             <ol className="value-list" role="list">
                                 {services.map((service, index) => (
                                     <li className="reveal" key={service}>
@@ -320,11 +316,10 @@ export default function Welcome() {
                             <div className="section-head reveal">
                                 <div>
                                     <p className="eyebrow">
-                                        One connected platform
+                                        From training activity to workforce readiness
                                     </p>
                                     <h2 className="section-title">
-                                        Everything your workforce needs to
-                                        learn, perform, and stay current.
+                                        Give employees the knowledge they need—and managers the visibility they’re missing.
                                     </h2>
                                 </div>
                                 <p className="section-lede">
@@ -421,9 +416,10 @@ export default function Welcome() {
                         <div className="site-container">
                             <div className="process-head reveal">
                                 <p className="eyebrow">
-                                    From know-how to know-how-to
+                                    More than software
                                 </p>
                                 <h2 className="section-title">
+                                    Your training team, without building one.
                                     Bring us what your team knows.{' '}
                                     <em>
                                         We help turn it into training that
@@ -461,9 +457,13 @@ export default function Welcome() {
                                         A practical path forward
                                     </p>
                                     <h2 className="cta-title">
-                                        You do not need a training department to
-                                        build a trained workforce.
+                                        Before you send them into the field, know they’re ready.
                                     </h2>
+                                    <div className="hero-lede w-full!"> 
+                                            Let’s identify one training problem Eigen can turn into a focused mobile pilot.
+
+
+                                        </div>
                                 </div>
                                 <div className="cta-action">
                                     <a
@@ -662,7 +662,7 @@ const welcomeStyles = String.raw`
 .value-section { position: relative; overflow: hidden; padding-block: clamp(80px,8vw,128px); color: #e7f0e6; background: radial-gradient(ellipse 60% 50% at 85% 0%,rgba(115,223,120,.09),transparent 60%),#06130f; }
 .value-section::after { position: absolute; inset: 0; content: ''; pointer-events: none; background-image: linear-gradient(to right,rgba(214,235,222,.14) 1px,transparent 1px); background-size: 72px 72px; mask-image: linear-gradient(to bottom,black,transparent 85%); }
 .value-section .site-container { position: relative; z-index: 1; }
-.value-head, .section-head { display: grid; grid-template-columns: 1.4fr 1fr; gap: 48px; align-items: end; margin-bottom: 64px; }
+.value-head, .section-head { display: grid; grid-template-columns: 1.4fr 1fr; gap: 48px; margin-bottom: 64px; }
 .eyebrow-light, .eyebrow-chartreuse { color: var(--site-chartreuse) !important; }
 .value-title { margin-top: 20px !important; color: #f3f7ef; font-size: clamp(2.1rem,1.4rem + 2.6vw,3.6rem); }
 .value-title em { color: var(--site-chartreuse); font-style: normal; }
@@ -672,7 +672,7 @@ const welcomeStyles = String.raw`
 .value-list li:hover { padding-left: 16px; background: rgba(199,239,75,.04); }
 .value-num { color: var(--site-chartreuse); font-size: .875rem; letter-spacing: .1em; }
 .value-list p { max-width: 34ch; color: #dce9dc; font-family: 'Cabinet Grotesk',sans-serif; font-size: clamp(1.125rem,1rem + .75vw,1.5rem); font-weight: 500; line-height: 1.35; }
-.platform-section { padding-block: clamp(80px,8vw,128px); background: radial-gradient(circle at 8% 15%,rgba(73,141,116,.09),transparent 28%),var(--site-bg); }
+.platform-section { padding-block: clamp(80px,0,128px); background: radial-gradient(circle at 8% 15%,rgba(73,141,116,.09),transparent 28%),var(--site-bg); }
 .section-title { max-width: 22ch; margin-top: 20px !important; font-size: clamp(1.8rem,1.25rem + 2vw,3rem); }
 .section-title em { color: var(--site-chartreuse); font-style: normal; }
 .section-lede { color: var(--site-muted); }
