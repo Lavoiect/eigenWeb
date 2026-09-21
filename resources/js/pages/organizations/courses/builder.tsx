@@ -130,6 +130,7 @@ type Course = {
     learning_objectives: string[] | null;
     assets: CourseAsset[];
     estimated_minutes: number | null;
+    completion_window_days: number | null;
     passing_score: number | null;
     status: 'draft' | 'published' | 'archived';
     status_label: string;
@@ -301,6 +302,7 @@ type CourseDraft = {
     description: string;
     learning_objectives: string;
     estimated_minutes: string;
+    completion_window_days: string;
     passing_score: string;
     pathway_id: string;
     status: 'draft' | 'published' | 'archived';
@@ -461,6 +463,10 @@ function courseToDraft(course: Course): CourseDraft {
         estimated_minutes:
             course.estimated_minutes !== null
                 ? String(course.estimated_minutes)
+                : '',
+        completion_window_days:
+            course.completion_window_days !== null
+                ? String(course.completion_window_days)
                 : '',
         passing_score:
             course.passing_score !== null ? String(course.passing_score) : '',
@@ -1813,6 +1819,9 @@ function CourseBuilderPage({
             description: courseDraft.description.trim() || null,
             learning_objectives: courseDraft.learning_objectives.trim() || null,
             estimated_minutes: fromNumberField(courseDraft.estimated_minutes),
+            completion_window_days: fromNumberField(
+                courseDraft.completion_window_days,
+            ),
             passing_score: fromNumberField(courseDraft.passing_score),
             pathway_id: fromNumberField(courseDraft.pathway_id),
             status: nextStatus ?? courseDraft.status,
@@ -3398,6 +3407,46 @@ function CourseBuilderPage({
                                                     )}
                                                 />
                                             </div>
+                                            <div className="grid gap-2 sm:col-span-2">
+                                                <Label htmlFor="course-completion-window">
+                                                    Completion window
+                                                </Label>
+                                                <div className="relative sm:max-w-xs">
+                                                    <Input
+                                                        id="course-completion-window"
+                                                        type="number"
+                                                        min="1"
+                                                        max="3650"
+                                                        value={
+                                                            courseDraft.completion_window_days
+                                                        }
+                                                        onChange={(event) =>
+                                                            updateCourseDraft({
+                                                                completion_window_days:
+                                                                    event.target
+                                                                        .value,
+                                                            })
+                                                        }
+                                                        className={`${baseFieldClass} pr-14`}
+                                                        placeholder="30"
+                                                    />
+                                                    <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs text-muted-foreground">
+                                                        days
+                                                    </span>
+                                                </div>
+                                                <p className="text-xs text-muted-foreground">
+                                                    Sets the default due date
+                                                    for standalone assignments.
+                                                    Pathway assignments use the
+                                                    pathway completion window.
+                                                </p>
+                                                <InputError
+                                                    message={fieldError(
+                                                        courseErrors,
+                                                        'completion_window_days',
+                                                    )}
+                                                />
+                                            </div>
                                         </div>
                                     </details>
 
@@ -4406,6 +4455,11 @@ function CourseBuilderPage({
                                                         'due_at',
                                                     )}
                                                 />
+                                                <p className="text-xs text-muted-foreground">
+                                                    {courseDraft.completion_window_days
+                                                        ? `Leave blank to use the ${courseDraft.completion_window_days}-day course completion window.`
+                                                        : 'Set a date here, or add a course completion window in Settings.'}
+                                                </p>
                                             </div>
 
                                             <div className="grid gap-2">

@@ -5,6 +5,7 @@ import {
     FolderOpen,
     LayoutGrid,
     Network,
+    Send,
     Users,
 } from 'lucide-react';
 import AppLogo from '@/components/app-logo';
@@ -34,6 +35,11 @@ export function AppSidebar() {
                       title: 'Organizations',
                       href: '/platform/organizations',
                       icon: Network,
+                  },
+                  {
+                      title: 'Email Campaigns',
+                      href: '/platform/email-campaigns',
+                      icon: Send,
                   },
               ]
             : []),

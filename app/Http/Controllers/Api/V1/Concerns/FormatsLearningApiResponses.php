@@ -42,6 +42,7 @@ trait FormatsLearningApiResponses
                 fn ($objective): bool => filled($objective),
             )),
             'estimated_minutes' => $course->estimated_minutes,
+            'completion_window_days' => $course->completion_window_days,
             'passing_score' => $course->passing_score,
             'status' => $course->status,
             'status_label' => ucfirst($course->status),

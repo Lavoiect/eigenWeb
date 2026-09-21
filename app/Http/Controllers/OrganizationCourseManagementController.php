@@ -96,6 +96,7 @@ class OrganizationCourseManagementController extends Controller
                     ...$this->coursePayload($course),
                     'subject' => $course->subject,
                     'estimated_minutes' => $course->estimated_minutes,
+                    'completion_window_days' => $course->completion_window_days,
                     'passing_score' => $course->passing_score,
                     'assignment_count' => $course->assignments_count,
                     'assigned_count' => $recipientIds->count(),
@@ -303,6 +304,7 @@ class OrganizationCourseManagementController extends Controller
                 ...$this->coursePayload($course, null, [], $assetUsageCounts, $assetUsageDetails),
                 'subject' => $course->subject,
                 'estimated_minutes' => $course->estimated_minutes,
+                'completion_window_days' => $course->completion_window_days,
                 'passing_score' => $course->passing_score,
                 'assignment_count' => $course->assignments_count,
                 'lesson_count' => $course->lessons_count,
@@ -347,6 +349,7 @@ class OrganizationCourseManagementController extends Controller
             'description' => ['nullable', 'string'],
             'learning_objectives' => ['nullable', 'string', 'max:5000'],
             'estimated_minutes' => ['nullable', 'integer', 'min:1'],
+            'completion_window_days' => ['nullable', 'integer', 'min:1', 'max:3650'],
             'passing_score' => ['nullable', 'integer', 'min:0', 'max:100'],
             'pathway_id' => [
                 'nullable',
@@ -376,6 +379,7 @@ class OrganizationCourseManagementController extends Controller
                 'description' => $validated['description'] ?? null,
                 'learning_objectives' => $this->normalizeLearningObjectives($validated['learning_objectives'] ?? null),
                 'estimated_minutes' => $validated['estimated_minutes'] ?? null,
+                'completion_window_days' => $validated['completion_window_days'] ?? null,
                 'passing_score' => $validated['passing_score'] ?? null,
                 'pathway_id' => $validated['pathway_id'] ?? null,
                 'status' => $validated['status'] ?? 'draft',
@@ -496,6 +500,7 @@ class OrganizationCourseManagementController extends Controller
             'description' => ['sometimes', 'nullable', 'string'],
             'learning_objectives' => ['sometimes', 'nullable', 'string', 'max:5000'],
             'estimated_minutes' => ['sometimes', 'nullable', 'integer', 'min:1'],
+            'completion_window_days' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:3650'],
             'passing_score' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:100'],
             'pathway_id' => [
                 'sometimes',
@@ -555,6 +560,10 @@ class OrganizationCourseManagementController extends Controller
 
         if (array_key_exists('estimated_minutes', $validated)) {
             $course->estimated_minutes = $validated['estimated_minutes'];
+        }
+
+        if (array_key_exists('completion_window_days', $validated)) {
+            $course->completion_window_days = $validated['completion_window_days'];
         }
 
         if (array_key_exists('passing_score', $validated)) {
@@ -679,6 +688,7 @@ class OrganizationCourseManagementController extends Controller
                 'description' => $course->description,
                 'learning_objectives' => $course->learning_objectives,
                 'estimated_minutes' => $course->estimated_minutes,
+                'completion_window_days' => $course->completion_window_days,
                 'passing_score' => $course->passing_score,
                 'status' => 'draft',
                 'published_at' => null,
@@ -716,6 +726,7 @@ class OrganizationCourseManagementController extends Controller
         Request $request,
         Organization $organization,
         Course $course,
+        PathwayAssignmentService $pathwayAssignments,
     ): RedirectResponse {
         $user = $request->user()->loadMissing('organization');
         $this->assertCanAuthorTraining($user, $organization);
@@ -725,6 +736,7 @@ class OrganizationCourseManagementController extends Controller
             'status' => 'archived',
             'archived_at' => now(),
         ])->save();
+        $pathwayAssignments->syncCourse($course);
 
         Inertia::flash('toast', [
             'type' => 'success',
@@ -1568,7 +1580,7 @@ class OrganizationCourseManagementController extends Controller
             'assigned_to_team_id' => $validated['assigned_to_team_id'] ?? null,
             'assigned_to_job_title_id' => $validated['assigned_to_job_title_id'] ?? null,
             'assigned_to_location_id' => $validated['assigned_to_location_id'] ?? null,
-            'due_at' => $validated['due_at'] ?? null,
+            'due_at' => $validated['due_at'] ?? $course->completionDueAt(),
             'is_required' => $validated['is_required'] ?? true,
             'recurs_every_days' => $validated['recurs_every_days'] ?? null,
             'reminder_count' => 0,
@@ -1667,7 +1679,9 @@ class OrganizationCourseManagementController extends Controller
             ->whereIn('user_id', $recipients->pluck('id')->all())
             ->get()
             ->keyBy('user_id');
-        $dueAt = $validated['due_at'] ?? now()->addDays(7)->toDateString();
+        $dueAt = $validated['due_at']
+            ?? $course->completionDueAt()
+            ?? now()->addDays(7)->toDateString();
         $reassignedCount = 0;
 
         foreach ($recipients as $recipient) {

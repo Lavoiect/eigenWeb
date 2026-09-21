@@ -79,6 +79,7 @@ type CourseRow = {
     subject: string | null;
     description: string | null;
     estimated_minutes: number | null;
+    completion_window_days: number | null;
     status: CourseStatus;
     status_label: string;
     lesson_count: number;
@@ -401,8 +402,8 @@ export default function OrganizationCoursesIndex() {
         }
 
         router.patch(
-            `/organizations/${organization.id}/courses/${course.id}/archive`,
-            {},
+            `/organizations/${organization.id}/courses/${course.id}`,
+            { status: 'archived' },
             { preserveScroll: true },
         );
     };
@@ -1316,6 +1317,11 @@ export default function OrganizationCoursesIndex() {
                                                 errors.expected_completion_days
                                             }
                                         />
+                                        <p className="text-xs text-muted-foreground">
+                                            Each employee gets this many days to
+                                            finish after the pathway is assigned
+                                            automatically.
+                                        </p>
                                     </div>
                                     <label className="flex min-h-10 items-center gap-3 self-end rounded-md border px-3 py-2 text-sm">
                                         <input
@@ -1512,6 +1518,36 @@ export default function OrganizationCoursesIndex() {
                                                 message={errors.pathway_id}
                                             />
                                         </div>
+                                    </div>
+
+                                    <div className="grid gap-2">
+                                        <Label htmlFor="create-course-completion-window">
+                                            Completion window
+                                        </Label>
+                                        <div className="relative sm:max-w-xs">
+                                            <Input
+                                                id="create-course-completion-window"
+                                                name="completion_window_days"
+                                                type="number"
+                                                min="1"
+                                                max="3650"
+                                                className="pr-14"
+                                                placeholder="30"
+                                            />
+                                            <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs text-muted-foreground">
+                                                days
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                            Used to calculate the due date when
+                                            this course is assigned outside a
+                                            pathway.
+                                        </p>
+                                        <InputError
+                                            message={
+                                                errors.completion_window_days
+                                            }
+                                        />
                                     </div>
 
                                     {createMode === 'microlearning' && (

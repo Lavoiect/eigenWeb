@@ -7,6 +7,7 @@ import {
     Menu,
     Network,
     Search,
+    Send,
     Users,
 } from 'lucide-react';
 import AppLogo from '@/components/app-logo';
@@ -79,6 +80,11 @@ export function AppHeader({ breadcrumbs = [] }: Props) {
                       title: 'Organizations',
                       href: '/platform/organizations',
                       icon: Network,
+                  },
+                  {
+                      title: 'Email Campaigns',
+                      href: '/platform/email-campaigns',
+                      icon: Send,
                   },
               ]
             : []),

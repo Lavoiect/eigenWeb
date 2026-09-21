@@ -26,6 +26,7 @@ class CourseReviewSnapshot
                 'description' => $course->description,
                 'learning_objectives' => array_values($course->learning_objectives ?? []),
                 'estimated_minutes' => $course->estimated_minutes,
+                'completion_window_days' => $course->completion_window_days,
                 'passing_score' => $course->passing_score,
                 'pathway_id' => $course->pathway_id,
             ],

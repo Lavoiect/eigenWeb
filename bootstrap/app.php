@@ -1,10 +1,10 @@
 <?php
 
 use App\Http\Middleware\EnsureOrganizationAdmin;
-use App\Http\Middleware\EnsureUserIsActive;
 use App\Http\Middleware\EnsurePasswordChanged;
 use App\Http\Middleware\EnsurePlatformAdmin;
 use App\Http\Middleware\EnsureTeamManager;
+use App\Http\Middleware\EnsureUserIsActive;
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
 use Illuminate\Foundation\Application;
@@ -22,6 +22,7 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
+        $middleware->validateCsrfTokens(except: ['webhooks/mailgun/*']);
         $middleware->alias([
             'organization.admin' => EnsureOrganizationAdmin::class,
             'user.active' => EnsureUserIsActive::class,

@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Course;
+use App\Models\CourseAssignment;
 use App\Models\CourseProgress;
 use App\Models\JobTitle;
 use App\Models\Lesson;
@@ -8,6 +9,7 @@ use App\Models\LessonCompletion;
 use App\Models\Organization;
 use App\Models\Pathway;
 use App\Models\User;
+use App\Services\PathwayAssignmentService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Inertia\Testing\AssertableInertia as Assert;
 
@@ -223,6 +225,22 @@ test('organization admins can assign job titles from the pathway page', function
         'assigned_to_user_id' => $learner->id,
         'assigned_to_pathway_id' => $pathway->id,
     ]);
+
+    $assignment = CourseAssignment::query()
+        ->where('course_id', $course->id)
+        ->where('assigned_to_user_id', $learner->id)
+        ->where('assigned_to_pathway_id', $pathway->id)
+        ->firstOrFail();
+    $originalDueAt = $assignment->due_at?->toIso8601String();
+
+    expect($assignment->due_at?->toDateString())
+        ->toBe(now()->addDays(30)->toDateString());
+
+    $this->travel(2)->days();
+    app(PathwayAssignmentService::class)->syncCourse($course);
+
+    expect($assignment->fresh()->due_at?->toIso8601String())
+        ->toBe($originalDueAt);
 });
 
 test('job titles from another organization cannot be assigned to a pathway', function () {

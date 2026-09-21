@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Carbon\CarbonInterface;
 use Database\Factories\PathwayFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -63,5 +64,14 @@ class Pathway extends Model
     public function milestones(): HasMany
     {
         return $this->hasMany(PathwayMilestone::class)->orderBy('sort_order')->orderBy('id');
+    }
+
+    public function completionDueAt(?CarbonInterface $assignedAt = null): ?CarbonInterface
+    {
+        if ($this->expected_completion_days === null) {
+            return null;
+        }
+
+        return ($assignedAt ?? now())->copy()->addDays($this->expected_completion_days);
     }
 }

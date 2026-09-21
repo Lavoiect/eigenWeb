@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\CourseAssignment;
 use App\Models\JobTitle;
 use App\Models\Organization;
 use App\Models\Pathway;
@@ -31,9 +32,11 @@ test('organization admins can author training content', function () {
     $course = $this->postJson('/api/v1/organization/courses', [
         'title' => 'New Course',
         'description' => 'Draft course',
+        'completion_window_days' => 10,
     ])
         ->assertCreated()
         ->assertJsonPath('course.title', 'New Course')
+        ->assertJsonPath('course.completion_window_days', 10)
         ->assertJsonPath('course.status', 'draft')
         ->json('course');
 
@@ -107,6 +110,36 @@ test('managers cannot access org admin authoring endpoints', function () {
         'title' => 'Blocked Course',
     ])
         ->assertForbidden();
+});
+
+test('archiving a course through the API removes its assignments', function () {
+    $organization = Organization::factory()->create();
+    $admin = User::factory()->organizationAdmin($organization)->create();
+    $learner = User::factory()->learner($organization)->create();
+
+    Sanctum::actingAs($admin, ['mobile-api']);
+
+    $course = $this->postJson('/api/v1/organization/courses', [
+        'title' => 'Temporary Training',
+        'status' => 'published',
+    ])
+        ->assertCreated()
+        ->json('course');
+
+    $this->postJson("/api/v1/organization/courses/{$course['id']}/assignments", [
+        'assigned_to_user_id' => $learner->id,
+    ])->assertCreated();
+
+    $this->patchJson("/api/v1/organization/courses/{$course['id']}", [
+        'status' => 'archived',
+    ])
+        ->assertOk()
+        ->assertJsonPath('course.status', 'archived')
+        ->assertJsonPath('course.assignment_count', 0);
+
+    expect(CourseAssignment::query()
+        ->where('course_id', $course['id'])
+        ->exists())->toBeFalse();
 });
 
 test('job title assignments are visible to learners with that title', function () {

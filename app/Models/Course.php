@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Carbon\CarbonInterface;
 use Database\Factories\CourseFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -18,6 +19,7 @@ use Illuminate\Support\Carbon;
  * @property string $title
  * @property string $slug
  * @property string|null $description
+ * @property int|null $completion_window_days
  * @property string $status
  * @property Carbon|null $published_at
  * @property Carbon|null $archived_at
@@ -33,6 +35,7 @@ use Illuminate\Support\Carbon;
     'description',
     'learning_objectives',
     'estimated_minutes',
+    'completion_window_days',
     'passing_score',
     'status',
     'published_at',
@@ -43,11 +46,21 @@ class Course extends Model
     /** @use HasFactory<CourseFactory> */
     use HasFactory;
 
+    protected static function booted(): void
+    {
+        static::updated(function (Course $course): void {
+            if ($course->wasChanged('status') && $course->isArchived()) {
+                $course->assignments()->delete();
+            }
+        });
+    }
+
     protected function casts(): array
     {
         return [
             'learning_objectives' => 'array',
             'estimated_minutes' => 'integer',
+            'completion_window_days' => 'integer',
             'passing_score' => 'integer',
             'published_at' => 'datetime',
             'archived_at' => 'datetime',
@@ -115,6 +128,15 @@ class Course extends Model
     public function isArchived(): bool
     {
         return $this->status === 'archived';
+    }
+
+    public function completionDueAt(?CarbonInterface $assignedAt = null): ?CarbonInterface
+    {
+        if ($this->completion_window_days === null) {
+            return null;
+        }
+
+        return ($assignedAt ?? now())->copy()->addDays($this->completion_window_days);
     }
 
     public function scopeVisibleTo(Builder $query, User $user): Builder

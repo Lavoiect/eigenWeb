@@ -13,6 +13,7 @@ use App\Policies\LessonPolicy;
 use App\Policies\OrganizationPolicy;
 use App\Policies\TeamPolicy;
 use Carbon\CarbonImmutable;
+use Illuminate\Foundation\DevCommands;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -34,6 +35,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        DevCommands::artisan('queue:listen --tries=3 --timeout=0', 'queue')->green();
+        DevCommands::artisan('schedule:work', 'scheduler')->purple();
         $this->configureDefaults();
         $this->configureAuthorization();
     }

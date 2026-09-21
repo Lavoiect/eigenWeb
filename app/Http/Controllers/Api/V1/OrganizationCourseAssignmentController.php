@@ -7,13 +7,13 @@ use App\Http\Controllers\Api\V1\Concerns\ResolvesOrganizationContentContext;
 use App\Http\Controllers\Controller;
 use App\Models\Course;
 use App\Models\CourseAssignment;
+use App\Services\ExpoPushService;
+use App\Services\NotificationRecipientResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
-use App\Services\ExpoPushService;
-use App\Services\NotificationRecipientResolver;
 
 class OrganizationCourseAssignmentController extends Controller
 {
@@ -71,25 +71,33 @@ class OrganizationCourseAssignmentController extends Controller
             ]);
         }
 
-        $assignment = CourseAssignment::query()->updateOrCreate(
-            [
-                'course_id' => $course->getKey(),
-                'assigned_to_user_id' => $validated['assigned_to_user_id'] ?? null,
-                'assigned_to_team_id' => $validated['assigned_to_team_id'] ?? null,
-                'assigned_to_job_title_id' => $validated['assigned_to_job_title_id'] ?? null,
-                'assigned_to_location_id' => $validated['assigned_to_location_id'] ?? null,
-            ],
-            [
-                'assigned_by_id' => $user->getKey(),
-                'due_at' => $validated['due_at'] ?? null,
-                'is_required' => $validated['is_required'] ?? true,
-                'recurs_every_days' => $validated['recurs_every_days'] ?? null,
-            ],
-        );
+        $attributes = [
+            'course_id' => $course->getKey(),
+            'assigned_to_user_id' => $validated['assigned_to_user_id'] ?? null,
+            'assigned_to_team_id' => $validated['assigned_to_team_id'] ?? null,
+            'assigned_to_job_title_id' => $validated['assigned_to_job_title_id'] ?? null,
+            'assigned_to_location_id' => $validated['assigned_to_location_id'] ?? null,
+        ];
+        $assignment = CourseAssignment::query()->firstOrNew($attributes);
+        $isNewAssignment = ! $assignment->exists;
+
+        $assignment->fill([
+            'assigned_by_id' => $user->getKey(),
+            'is_required' => $validated['is_required'] ?? true,
+            'recurs_every_days' => $validated['recurs_every_days'] ?? null,
+        ]);
+
+        if ($isNewAssignment) {
+            $assignment->due_at = $validated['due_at'] ?? $course->completionDueAt();
+        } elseif (filled($validated['due_at'] ?? null)) {
+            $assignment->due_at = $validated['due_at'];
+        }
+
+        $assignment->save();
 
         $assignment->load(['course', 'assignedBy', 'assignedToUser', 'assignedToTeam', 'assignedToJobTitle', 'assignedToLocation', 'assignedToPathway']);
 
-        if ($assignment->wasRecentlyCreated) {
+        if ($isNewAssignment) {
             $pushService->sendToUsers(
                 $recipientResolver->forAssignment($assignment),
                 'New assignment',
@@ -105,7 +113,7 @@ class OrganizationCourseAssignmentController extends Controller
 
         return response()->json([
             'assignment' => $this->assignmentPayload($assignment, $user),
-        ], $assignment->wasRecentlyCreated ? 201 : 200);
+        ], $isNewAssignment ? 201 : 200);
     }
 
     public function destroy(Request $request, Course $course, CourseAssignment $assignment): Response

@@ -11,17 +11,30 @@ class PathwayAssignmentService
 {
     public function syncCourse(Course $course, ?int $previousPathwayId = null): void
     {
-        if ($previousPathwayId !== null) {
+        if ($course->isArchived()) {
+            $course->assignments()->delete();
+
+            return;
+        }
+
+        if (
+            $previousPathwayId !== null
+            && $previousPathwayId !== $course->pathway_id
+        ) {
             $course->assignments()
                 ->where('assigned_to_pathway_id', $previousPathwayId)
                 ->delete();
         }
 
-        if (! $course->isPublished()) {
+        if (! $course->isPublished() || $course->pathway_id === null) {
+            $course->assignments()
+                ->whereNotNull('assigned_to_pathway_id')
+                ->delete();
+
             return;
         }
 
-        $pathway = $course->pathway;
+        $pathway = $course->pathway()->first();
 
         if ($pathway === null) {
             return;
@@ -32,8 +45,19 @@ class PathwayAssignmentService
             ->whereHas('jobTitle', fn ($query) => $query->where('pathway_id', $pathway->getKey()))
             ->get();
 
+        $currentAssignments = $course->assignments()
+            ->where('assigned_to_pathway_id', $pathway->getKey());
+
+        if ($users->isEmpty()) {
+            $currentAssignments->delete();
+        } else {
+            $currentAssignments
+                ->whereNotIn('assigned_to_user_id', $users->pluck('id')->all())
+                ->delete();
+        }
+
         foreach ($users as $user) {
-            $this->upsertAssignment($course, $user, $pathway->getKey());
+            $this->createAssignmentIfMissing($course, $user, $pathway);
         }
     }
 
@@ -52,35 +76,51 @@ class PathwayAssignmentService
     {
         $user->load(['jobTitle.pathway']);
 
-        $user->courseAssignments()
-            ->whereNotNull('assigned_to_pathway_id')
-            ->delete();
-
         $pathway = $user->jobTitle?->pathway;
 
         if ($pathway === null) {
+            $user->courseAssignments()
+                ->whereNotNull('assigned_to_pathway_id')
+                ->delete();
+
             return;
         }
+
+        $user->courseAssignments()
+            ->whereNotNull('assigned_to_pathway_id')
+            ->where('assigned_to_pathway_id', '!=', $pathway->getKey())
+            ->delete();
 
         $courses = $pathway->courses()
             ->where('status', 'published')
             ->get();
 
+        $currentAssignments = $user->courseAssignments()
+            ->where('assigned_to_pathway_id', $pathway->getKey());
+
+        if ($courses->isEmpty()) {
+            $currentAssignments->delete();
+        } else {
+            $currentAssignments
+                ->whereNotIn('course_id', $courses->pluck('id')->all())
+                ->delete();
+        }
+
         foreach ($courses as $course) {
-            $this->upsertAssignment($course, $user, $pathway->getKey());
+            $this->createAssignmentIfMissing($course, $user, $pathway);
         }
     }
 
-    private function upsertAssignment(Course $course, User $user, int $pathwayId): void
+    private function createAssignmentIfMissing(Course $course, User $user, Pathway $pathway): void
     {
-        $course->assignments()->updateOrCreate(
+        $course->assignments()->firstOrCreate(
             [
                 'assigned_to_user_id' => $user->getKey(),
-                'assigned_to_pathway_id' => $pathwayId,
+                'assigned_to_pathway_id' => $pathway->getKey(),
             ],
             [
                 'assigned_by_id' => null,
-                'due_at' => null,
+                'due_at' => $pathway->completionDueAt(),
             ],
         );
     }

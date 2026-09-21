@@ -27,6 +27,7 @@ test('creating an assignment returns to the training page', function () {
         'title' => 'Safety Basics',
         'slug' => 'safety-basics',
         'content_type' => 'course',
+        'completion_window_days' => 30,
         'status' => 'published',
         'published_at' => now(),
     ]);
@@ -40,10 +41,46 @@ test('creating an assignment returns to the training page', function () {
         ])
         ->assertRedirect(route('organizations.courses.index', $organization));
 
-    expect(CourseAssignment::query()
+    $assignment = CourseAssignment::query()
         ->where('course_id', $course->id)
         ->where('assigned_to_user_id', $learner->id)
-        ->exists())->toBeTrue();
+        ->firstOrFail();
+
+    expect($assignment->due_at?->toDateString())
+        ->toBe(now()->addWeek()->toDateString());
+});
+
+test('standalone assignments use the course completion window when no due date is selected', function () {
+    $organization = Organization::factory()->create();
+    $admin = User::factory()->organizationAdmin($organization)->create();
+    $learner = User::factory()->learner($organization)->create();
+    $course = Course::create([
+        'organization_id' => $organization->id,
+        'created_by_id' => $admin->id,
+        'title' => 'Equipment Orientation',
+        'slug' => 'equipment-orientation',
+        'content_type' => 'course',
+        'completion_window_days' => 14,
+        'status' => 'published',
+        'published_at' => now(),
+    ]);
+
+    $assignedAt = now();
+
+    $this->actingAs($admin)
+        ->post(route('organizations.courses.assignments.store', [$organization, $course]), [
+            'assigned_to_user_id' => $learner->id,
+            'is_required' => true,
+        ])
+        ->assertRedirect(route('organizations.courses.index', $organization));
+
+    $assignment = CourseAssignment::query()
+        ->where('course_id', $course->id)
+        ->where('assigned_to_user_id', $learner->id)
+        ->firstOrFail();
+
+    expect($assignment->due_at?->toDateString())
+        ->toBe($assignedAt->copy()->addDays(14)->toDateString());
 });
 
 test('organization admins can open the course builder and save block-based lessons', function () {
@@ -151,6 +188,7 @@ test('organization admins can open the course builder and save block-based lesso
         ->patch(route('organizations.courses.update', [$organization, $course]), [
             'subject' => 'Frontline Safety',
             'estimated_minutes' => 20,
+            'completion_window_days' => 21,
             'passing_score' => 85,
         ])
         ->assertRedirect();
@@ -159,6 +197,7 @@ test('organization admins can open the course builder and save block-based lesso
 
     expect($course->subject)->toBe('Frontline Safety');
     expect($course->estimated_minutes)->toBe(20);
+    expect($course->completion_window_days)->toBe(21);
     expect($course->passing_score)->toBe(85);
 
     $this->actingAs($admin)

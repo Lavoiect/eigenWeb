@@ -11,6 +11,36 @@ use Inertia\Testing\AssertableInertia as Assert;
 
 uses(RefreshDatabase::class);
 
+test('archiving from the training page status endpoint removes assignments', function () {
+    $organization = Organization::factory()->create();
+    $admin = User::factory()->organizationAdmin($organization)->create();
+    $learner = User::factory()->learner($organization)->create();
+    $course = Course::create([
+        'organization_id' => $organization->id,
+        'created_by_id' => $admin->id,
+        'title' => 'Archive Safeguard',
+        'slug' => 'archive-safeguard',
+        'status' => 'published',
+        'published_at' => now(),
+    ]);
+
+    CourseAssignment::create([
+        'course_id' => $course->id,
+        'assigned_by_id' => $admin->id,
+        'assigned_to_user_id' => $learner->id,
+        'is_required' => true,
+    ]);
+
+    $this->actingAs($admin)
+        ->patch(route('organizations.courses.update', [$organization, $course]), [
+            'status' => 'archived',
+        ])
+        ->assertRedirect();
+
+    expect($course->fresh()->status)->toBe('archived')
+        ->and($course->assignments()->exists())->toBeFalse();
+});
+
 test('organization admins can manage courses and lessons from the web dashboard', function () {
     $organization = Organization::factory()->create();
     $admin = User::factory()->organizationAdmin($organization)->create();
@@ -74,6 +104,14 @@ test('organization admins can manage courses and lessons from the web dashboard'
         'Report issues',
     ]);
 
+    $learner = User::factory()->learner($organization)->create();
+    CourseAssignment::create([
+        'course_id' => $duplicate->id,
+        'assigned_by_id' => $admin->id,
+        'assigned_to_user_id' => $learner->id,
+        'is_required' => true,
+    ]);
+
     $this->actingAs($admin)
         ->patch(route('organizations.courses.archive', [$organization, $duplicate]))
         ->assertRedirect();
@@ -82,6 +120,7 @@ test('organization admins can manage courses and lessons from the web dashboard'
 
     expect($duplicate->status)->toBe('archived');
     expect($duplicate->archived_at)->not->toBeNull();
+    expect($duplicate->assignments()->count())->toBe(0);
 
     $this->actingAs($admin)
         ->post(route('organizations.courses.lessons.store', [$organization, $course]), [

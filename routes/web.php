@@ -9,6 +9,9 @@ use App\Http\Controllers\OrganizationPathwayController;
 use App\Http\Controllers\OrganizationReportingController;
 use App\Http\Controllers\OrganizationResourceController;
 use App\Http\Controllers\OrganizationUserController;
+use App\Http\Controllers\OutreachMailgunWebhookController;
+use App\Http\Controllers\OutreachUnsubscribeController;
+use App\Http\Controllers\PlatformEmailCampaignController;
 use App\Http\Controllers\PlatformOrganizationController;
 use App\Models\Team;
 use Illuminate\Support\Facades\Route;
@@ -19,6 +22,12 @@ Route::get('invitations/{invite:token}', [OrganizationInvitationController::clas
     ->name('invitations.show');
 Route::post('invitations/{invite:token}/switch-account', [OrganizationInvitationController::class, 'switchAccount'])
     ->name('invitations.switch-account');
+Route::get('outreach/unsubscribe/{token}', OutreachUnsubscribeController::class)
+    ->name('outreach.unsubscribe');
+Route::post('webhooks/mailgun/inbound', [OutreachMailgunWebhookController::class, 'inbound'])
+    ->name('webhooks.mailgun.inbound');
+Route::post('webhooks/mailgun/events', [OutreachMailgunWebhookController::class, 'event'])
+    ->name('webhooks.mailgun.events');
 
 Route::middleware(['auth', 'verified', 'password.changed'])->group(function () {
     Route::prefix('platform')
@@ -38,6 +47,26 @@ Route::middleware(['auth', 'verified', 'password.changed'])->group(function () {
                 ->name('platform.organizations.administrators.resend-activation');
             Route::delete('organization-context', [PlatformOrganizationController::class, 'exit'])
                 ->name('platform.organization-context.destroy');
+
+            Route::prefix('email-campaigns')->group(function () {
+                Route::get('/', [PlatformEmailCampaignController::class, 'dashboard'])->name('platform.email-campaigns.dashboard');
+                Route::get('campaigns', [PlatformEmailCampaignController::class, 'campaigns'])->name('platform.email-campaigns.campaigns');
+                Route::post('campaigns', [PlatformEmailCampaignController::class, 'storeCampaign'])->name('platform.email-campaigns.campaigns.store');
+                Route::get('campaigns/{campaign}', [PlatformEmailCampaignController::class, 'showCampaign'])->name('platform.email-campaigns.campaigns.show');
+                Route::put('campaigns/{campaign}', [PlatformEmailCampaignController::class, 'updateCampaign'])->name('platform.email-campaigns.campaigns.update');
+                Route::post('campaigns/{campaign}/start', [PlatformEmailCampaignController::class, 'startCampaign'])->name('platform.email-campaigns.campaigns.start');
+                Route::post('campaigns/{campaign}/pause', [PlatformEmailCampaignController::class, 'pauseCampaign'])->name('platform.email-campaigns.campaigns.pause');
+                Route::get('leads', [PlatformEmailCampaignController::class, 'leads'])->name('platform.email-campaigns.leads');
+                Route::get('leads/template', [PlatformEmailCampaignController::class, 'downloadLeadTemplate'])->name('platform.email-campaigns.leads.template');
+                Route::post('leads', [PlatformEmailCampaignController::class, 'storeLead'])->name('platform.email-campaigns.leads.store');
+                Route::post('leads/import', [PlatformEmailCampaignController::class, 'importLeads'])->name('platform.email-campaigns.leads.import');
+                Route::patch('leads/{lead}', [PlatformEmailCampaignController::class, 'updateLead'])->name('platform.email-campaigns.leads.update');
+                Route::get('inbox', [PlatformEmailCampaignController::class, 'inbox'])->name('platform.email-campaigns.inbox');
+                Route::get('settings', [PlatformEmailCampaignController::class, 'settings'])->name('platform.email-campaigns.settings');
+                Route::post('settings/accounts', [PlatformEmailCampaignController::class, 'storeEmailAccount'])->name('platform.email-campaigns.accounts.store');
+                Route::patch('settings/accounts/{account}', [PlatformEmailCampaignController::class, 'updateEmailAccount'])->name('platform.email-campaigns.accounts.update');
+                Route::delete('settings/accounts/{account}', [PlatformEmailCampaignController::class, 'destroyEmailAccount'])->name('platform.email-campaigns.accounts.destroy');
+            });
         });
 
     Route::get('dashboard', [DashboardController::class, 'show'])->name('dashboard');
