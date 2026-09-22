@@ -194,7 +194,9 @@ test('debug send now queues every eligible pending lead and bypasses delivery li
     ]);
 
     $this->actingAs($superAdmin)
-        ->post(route('platform.email-campaigns.campaigns.debug-send-now', $campaign))
+        ->post(route('platform.email-campaigns.campaigns.start', $campaign), [
+            'debug_send_now' => true,
+        ])
         ->assertSessionHasNoErrors()
         ->assertSessionHas('status', 'Queued 3 pending campaign emails for immediate sending.');
 

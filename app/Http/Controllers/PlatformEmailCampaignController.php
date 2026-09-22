@@ -286,8 +286,12 @@ class PlatformEmailCampaignController extends Controller
         return back()->with('status', 'Campaign sequence saved.');
     }
 
-    public function startCampaign(OutreachCampaign $campaign): RedirectResponse
+    public function startCampaign(Request $request, OutreachCampaign $campaign): RedirectResponse
     {
+        if ($request->boolean('debug_send_now')) {
+            return $this->debugSendNow($campaign);
+        }
+
         $campaign->loadMissing(['emailAccount', 'steps']);
         $emailAccount = $campaign->emailAccount;
 

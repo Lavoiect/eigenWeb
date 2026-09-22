@@ -1376,8 +1376,8 @@ function CampaignEditor({
                             }
                             onClick={() =>
                                 router.post(
-                                    `/platform/email-campaigns/campaigns/${campaign.id}/debug-send-now`,
-                                    {},
+                                    `/platform/email-campaigns/campaigns/${campaign.id}/start`,
+                                    { debug_send_now: true },
                                     {
                                         preserveScroll: true,
                                         onStart: () => setDebugSending(true),
