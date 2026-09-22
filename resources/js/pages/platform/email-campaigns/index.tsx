@@ -1334,8 +1334,9 @@ function CampaignEditor({
                         <DialogTitle>Send all pending emails now?</DialogTitle>
                         <DialogDescription>
                             This debug action immediately queues the current
-                            sequence step for every eligible lead in this
-                            campaign.
+                            sequence step for every eligible lead in your lead
+                            library. Leads not yet attached to this campaign
+                            will be added automatically.
                         </DialogDescription>
                     </DialogHeader>
                     <Alert className="border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
@@ -1354,9 +1355,9 @@ function CampaignEditor({
                         <strong className="text-foreground">
                             {campaign.sendable_count}
                         </strong>{' '}
-                        pending{' '}
+                        eligible{' '}
                         {campaign.sendable_count === 1 ? 'lead' : 'leads'} will
-                        be queued.
+                        be attached to this campaign if needed and queued.
                     </p>
                     <DialogFooter>
                         <Button

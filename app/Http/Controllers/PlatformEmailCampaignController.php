@@ -351,6 +351,19 @@ class PlatformEmailCampaignController extends Controller
             throw ValidationException::withMessages(['campaign' => 'Add at least one email to this campaign before sending.']);
         }
 
+        OutreachLead::query()
+            ->whereNotIn('status', ['replied', 'not_interested', 'bounced', 'unsubscribed'])
+            ->whereDoesntHave('campaignContacts', fn ($query) => $query->where('campaign_id', $campaign->getKey()))
+            ->select('id')
+            ->chunkById(100, function ($leads) use ($campaign): void {
+                foreach ($leads as $lead) {
+                    $campaign->contacts()->firstOrCreate(
+                        ['lead_id' => $lead->getKey()],
+                        ['status' => 'active', 'current_step' => 0, 'next_send_at' => now()],
+                    );
+                }
+            });
+
         $queued = 0;
         $campaign->contacts()
             ->whereIn('status', ['queued', 'active', 'paused'])
@@ -513,6 +526,14 @@ class PlatformEmailCampaignController extends Controller
                 'messages as sent_count' => fn ($query) => $query->where('direction', 'outbound')->where('status', 'sent'),
                 'messages as sent_today_count' => fn ($query) => $query->where('direction', 'outbound')->where('status', 'sent')->whereDate('sent_at', today()),
             ]);
+            $unattachedLeadCount = OutreachLead::query()
+                ->whereNotIn('status', ['replied', 'not_interested', 'bounced', 'unsubscribed'])
+                ->whereDoesntHave('campaignContacts', fn ($query) => $query->where('campaign_id', $selectedCampaign->getKey()))
+                ->count();
+            $selectedCampaign->setAttribute(
+                'sendable_count',
+                (int) $selectedCampaign->getAttribute('sendable_count') + $unattachedLeadCount,
+            );
         }
 
         return Inertia::render('platform/email-campaigns/index', [

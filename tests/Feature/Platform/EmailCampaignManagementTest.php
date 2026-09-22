@@ -169,6 +169,10 @@ test('debug send now queues every eligible pending lead and bypasses delivery li
         'status' => 'replied',
         'unsubscribe_token' => str_repeat('r', 48),
     ]);
+    $unattachedLead = outreachLead($superAdmin, [
+        'email' => 'unattached@example.com',
+        'unsubscribe_token' => str_repeat('u', 48),
+    ]);
     $pendingContact = $campaign->contacts()->create([
         'lead_id' => $pendingLead->id,
         'status' => 'active',
@@ -191,16 +195,20 @@ test('debug send now queues every eligible pending lead and bypasses delivery li
     $this->actingAs($superAdmin)
         ->post(route('platform.email-campaigns.campaigns.debug-send-now', $campaign))
         ->assertSessionHasNoErrors()
-        ->assertSessionHas('status', 'Queued 2 pending campaign emails for immediate sending.');
+        ->assertSessionHas('status', 'Queued 3 pending campaign emails for immediate sending.');
+
+    $unattachedContact = $campaign->contacts()->where('lead_id', $unattachedLead->id)->firstOrFail();
 
     expect($pendingContact->refresh()->status)->toBe('sending')
         ->and($pendingContact->next_send_at)->not->toBeNull()
         ->and($pausedContact->refresh()->status)->toBe('sending')
+        ->and($unattachedContact->status)->toBe('sending')
         ->and($repliedContact->refresh()->status)->toBe('replied');
 
-    Queue::assertPushed(SendOutreachEmail::class, 2);
+    Queue::assertPushed(SendOutreachEmail::class, 3);
     Queue::assertPushed(SendOutreachEmail::class, fn (SendOutreachEmail $job): bool => $job->campaignContactId === $pendingContact->id && $job->force);
     Queue::assertPushed(SendOutreachEmail::class, fn (SendOutreachEmail $job): bool => $job->campaignContactId === $pausedContact->id && $job->force);
+    Queue::assertPushed(SendOutreachEmail::class, fn (SendOutreachEmail $job): bool => $job->campaignContactId === $unattachedContact->id && $job->force);
 });
 
 test('a Super Admin can add only a sender on the configured Mailgun domain', function () {
