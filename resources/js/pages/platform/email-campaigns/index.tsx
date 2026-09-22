@@ -164,9 +164,9 @@ type PageProps = {
     email_accounts: EmailAccount[];
     inbox: InboxMessage[];
     selected_campaign: SelectedCampaign | null;
-    mailgun_configured: boolean;
-    mailgun_domain: string | null;
-    mailgun_inbound_domain: string | null;
+    bird_configured: boolean;
+    bird_domain: string | null;
+    bird_inbound_domain: string | null;
 };
 
 const navItems = [
@@ -374,11 +374,11 @@ function CampaignStatus({ value }: { value: string }) {
 function DashboardSection({
     stats,
     campaigns,
-    mailgunConnected,
+    birdConnected,
 }: {
     stats: Stats;
     campaigns: Campaign[];
-    mailgunConnected: boolean;
+    birdConnected: boolean;
 }) {
     const workflow = [
         ['Upload CSV', FileSpreadsheet],
@@ -390,13 +390,13 @@ function DashboardSection({
 
     return (
         <div className="space-y-6">
-            {!mailgunConnected && (
+            {!birdConnected && (
                 <Alert className="border-amber-300 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30">
                     <ShieldCheck />
-                    <AlertTitle>Add a Mailgun sender before sending</AlertTitle>
+                    <AlertTitle>Add a Bird sender before sending</AlertTitle>
                     <AlertDescription>
                         Campaigns can be drafted now, but sending and automatic
-                        reply detection require Mailgun configuration and an
+                        reply detection require Bird configuration and an
                         approved sender address.
                         <Button variant="link" className="h-auto p-0" asChild>
                             <Link href="/platform/email-campaigns/settings">
@@ -621,7 +621,7 @@ function CampaignsSection({
                         <AlertTitle>Complete setup first</AlertTitle>
                         <AlertDescription>
                             {connectedAccounts.length === 0
-                                ? 'Add a Mailgun sender in Settings. '
+                                ? 'Add a Bird sender in Settings. '
                                 : ''}
                             {contactableLeads.length === 0
                                 ? 'Import or add at least one contactable lead.'
@@ -1319,7 +1319,7 @@ function CampaignEditor({
                                 <MessageSquareReply />
                                 <AlertTitle>Replies stop follow-ups</AlertTitle>
                                 <AlertDescription>
-                                    Mailgun forwards replies to Eigen as they
+                                    Bird forwards replies to Eigen as they
                                     arrive. A verified reply immediately marks
                                     the lead as Replied and stops this sequence.
                                 </AlertDescription>
@@ -1743,7 +1743,7 @@ function InboxSection({
                         Inbox
                     </h2>
                     <p className="text-sm text-muted-foreground">
-                        Replies received through the verified Mailgun route.
+                        Replies received through the verified Bird webhook.
                     </p>
                 </div>
                 <Badge variant="outline" className="gap-2">
@@ -1871,18 +1871,18 @@ function SettingsSection({
                     Sending settings
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                    Manage Mailgun sender identities, sending hours, and volume.
+                    Manage Bird sender identities, sending hours, and volume.
                 </p>
             </div>
             {!configured && (
                 <Alert className="border-amber-300 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30">
                     <ShieldCheck />
-                    <AlertTitle>Mailgun configuration is required</AlertTitle>
+                    <AlertTitle>Bird configuration is required</AlertTitle>
                     <AlertDescription>
-                        Add <code>MAILGUN_DOMAIN</code>,{' '}
-                        <code>MAILGUN_SECRET</code>,{' '}
-                        <code>MAILGUN_WEBHOOK_SIGNING_KEY</code>, and{' '}
-                        <code>MAILGUN_INBOUND_DOMAIN</code> to the environment,
+                        Add <code>BIRD_API_KEY</code>,{' '}
+                        <code>BIRD_SENDING_DOMAIN</code>,{' '}
+                        <code>BIRD_INBOUND_DOMAIN</code>, and{' '}
+                        <code>BIRD_WEBHOOK_SECRET</code> to the environment,
                         then clear the configuration cache.
                     </AlertDescription>
                 </Alert>
@@ -1898,7 +1898,7 @@ function SettingsSection({
                                         {account.email}
                                     </CardTitle>
                                     <CardDescription>
-                                        Mailgun sender · Replies routed by
+                                        Bird sender · Replies routed by
                                         webhook
                                     </CardDescription>
                                 </div>
@@ -2013,14 +2013,14 @@ function SettingsSection({
                     {accounts.length === 0 && (
                         <EmptyState
                             icon={Mail}
-                            title="No Mailgun sender added"
-                            text="Add an address from your verified Mailgun sending domain."
+                            title="No Bird sender added"
+                            text="Add an address from your verified Bird sending domain."
                         />
                     )}
                 </div>
                 <Card className="h-fit shadow-none">
                     <CardHeader>
-                        <CardTitle>Add Mailgun sender</CardTitle>
+                        <CardTitle>Add Bird sender</CardTitle>
                         <CardDescription>
                             The API key remains in the environment. Only the
                             approved From address is stored here.
@@ -2031,7 +2031,7 @@ function SettingsSection({
                             <div className="flex gap-3">
                                 <Check className="mt-0.5 size-4 text-emerald-600" />
                                 <span>
-                                    Send through your verified Mailgun domain
+                                    Send through your verified Bird domain
                                 </span>
                             </div>
                             <div className="flex gap-3">
@@ -2063,7 +2063,11 @@ function SettingsSection({
                                             type="email"
                                             required
                                             disabled={!configured}
-                                            placeholder="outreach@mg.eigenlearning.com"
+                                            placeholder={
+                                                domain
+                                                    ? `outreach@${domain}`
+                                                    : 'outreach@eigen-learning.com'
+                                            }
                                         />
                                     </Field>
                                     <Field
@@ -2090,13 +2094,13 @@ function SettingsSection({
                                         )}
                                         {configured
                                             ? 'Add sender'
-                                            : 'Configure Mailgun first'}
+                                            : 'Configure Bird first'}
                                     </Button>
                                 </>
                             )}
                         </Form>
                         <div className="space-y-3 border-t pt-4 text-xs">
-                            <p className="font-semibold">Mailgun setup</p>
+                            <p className="font-semibold">Bird setup</p>
                             <div className="rounded-lg bg-muted/50 p-3">
                                 <p className="text-muted-foreground">
                                     Sending domain
@@ -2114,18 +2118,19 @@ function SettingsSection({
                                 </code>
                             </div>
                             <div>
-                                <p className="font-medium">Inbound route URL</p>
+                                <p className="font-medium">Webhook URL</p>
                                 <code className="mt-1 block break-all text-muted-foreground">
-                                    /webhooks/mailgun/inbound
+                                    /webhooks/bird
                                 </code>
                             </div>
                             <div>
-                                <p className="font-medium">
-                                    Permanent failure webhook
+                                <p className="font-medium">Webhook events</p>
+                                <p className="mt-1 text-muted-foreground">
+                                    email.received, email.bounced,
+                                    email.out_of_band_bounce, email.rejected,
+                                    email.complained, email.unsubscribed,
+                                    email.list_unsubscribed
                                 </p>
-                                <code className="mt-1 block break-all text-muted-foreground">
-                                    /webhooks/mailgun/events
-                                </code>
                             </div>
                         </div>
                     </CardContent>
@@ -2145,9 +2150,9 @@ export default function EmailCampaignWorkspace(props: PageProps) {
         inbox,
         selected_campaign,
         lead_statuses,
-        mailgun_configured,
-        mailgun_domain,
-        mailgun_inbound_domain,
+        bird_configured,
+        bird_domain,
+        bird_inbound_domain,
     } = props;
 
     return (
@@ -2160,7 +2165,7 @@ export default function EmailCampaignWorkspace(props: PageProps) {
                     <DashboardSection
                         stats={stats}
                         campaigns={campaigns}
-                        mailgunConnected={email_accounts.some(
+                        birdConnected={email_accounts.some(
                             (account) => account.status === 'connected',
                         )}
                     />
@@ -2188,9 +2193,9 @@ export default function EmailCampaignWorkspace(props: PageProps) {
                 {active_section === 'settings' && (
                     <SettingsSection
                         accounts={email_accounts}
-                        configured={mailgun_configured}
-                        domain={mailgun_domain}
-                        inboundDomain={mailgun_inbound_domain}
+                        configured={bird_configured}
+                        domain={bird_domain}
+                        inboundDomain={bird_inbound_domain}
                     />
                 )}
             </main>

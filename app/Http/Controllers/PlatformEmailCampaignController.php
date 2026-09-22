@@ -296,7 +296,7 @@ class PlatformEmailCampaignController extends Controller
         $emailAccount = $campaign->emailAccount;
 
         if (! $emailAccount instanceof OutreachEmailAccount || ! $emailAccount->isConnected()) {
-            throw ValidationException::withMessages(['email_account_id' => 'Add a connected Mailgun sender before starting.']);
+            throw ValidationException::withMessages(['email_account_id' => 'Add a connected Bird sender before starting.']);
         }
 
         if ($campaign->steps->isEmpty() || ! $campaign->contacts()->whereIn('status', ['queued', 'paused'])->exists()) {
@@ -348,7 +348,7 @@ class PlatformEmailCampaignController extends Controller
         }
 
         if (! $emailAccount instanceof OutreachEmailAccount || ! $emailAccount->isConnected()) {
-            throw ValidationException::withMessages(['email_account_id' => 'Add a connected Mailgun sender before sending.']);
+            throw ValidationException::withMessages(['email_account_id' => 'Add a connected Bird sender before sending.']);
         }
 
         if ($campaign->steps->isEmpty()) {
@@ -397,7 +397,7 @@ class PlatformEmailCampaignController extends Controller
 
     public function updateEmailAccount(Request $request, OutreachEmailAccount $account): RedirectResponse
     {
-        abort_unless($account->user_id === $request->user()->getKey() && $account->provider === 'mailgun', 404);
+        abort_unless($account->user_id === $request->user()->getKey() && $account->provider === 'bird', 404);
         $validated = $request->validate([
             'daily_limit' => ['required', 'integer', 'min:1', 'max:500'],
             'timezone' => ['required', 'timezone'],
@@ -411,7 +411,7 @@ class PlatformEmailCampaignController extends Controller
 
     public function storeEmailAccount(Request $request): RedirectResponse
     {
-        abort_unless($this->mailgunConfigured(), 503, 'Mailgun is not configured.');
+        abort_unless($this->birdConfigured(), 503, 'Bird is not configured.');
         $validated = $request->validate([
             'email' => [
                 'required',
@@ -419,21 +419,21 @@ class PlatformEmailCampaignController extends Controller
                 'max:255',
                 Rule::unique('outreach_email_accounts', 'email')->where(fn ($query) => $query
                     ->where('user_id', $request->user()->getKey())
-                    ->where('provider', 'mailgun')),
+                    ->where('provider', 'bird')),
             ],
             'daily_limit' => ['required', 'integer', 'min:1', 'max:500'],
         ]);
-        $domain = mb_strtolower((string) config('services.mailgun.domain'));
+        $domain = mb_strtolower((string) config('services.bird.sending_domain'));
 
         if (! str_ends_with(mb_strtolower($validated['email']), '@'.$domain)) {
             throw ValidationException::withMessages([
-                'email' => "Use a sender address on the configured Mailgun domain ({$domain}).",
+                'email' => "Use a sender address on the configured Bird sending domain ({$domain}).",
             ]);
         }
 
         OutreachEmailAccount::create([
             'user_id' => $request->user()->getKey(),
-            'provider' => 'mailgun',
+            'provider' => 'bird',
             'email' => mb_strtolower($validated['email']),
             'access_token' => 'configured-in-environment',
             'status' => 'connected',
@@ -443,12 +443,12 @@ class PlatformEmailCampaignController extends Controller
             'sending_end' => '17:00:00',
         ]);
 
-        return back()->with('status', 'Mailgun sender added.');
+        return back()->with('status', 'Bird sender added.');
     }
 
     public function destroyEmailAccount(Request $request, OutreachEmailAccount $account): RedirectResponse
     {
-        abort_unless($account->user_id === $request->user()->getKey() && $account->provider === 'mailgun', 404);
+        abort_unless($account->user_id === $request->user()->getKey() && $account->provider === 'bird', 404);
 
         DB::transaction(function () use ($account): void {
             $account->campaigns()->where('status', 'active')->update(['status' => 'paused', 'paused_at' => now()]);
@@ -458,7 +458,7 @@ class PlatformEmailCampaignController extends Controller
             $account->delete();
         });
 
-        return back()->with('status', 'Mailgun sender removed. Associated campaigns were paused.');
+        return back()->with('status', 'Bird sender removed. Associated campaigns were paused.');
     }
 
     private function renderWorkspace(string $section, ?OutreachCampaign $selectedCampaign = null, ?Request $request = null): Response
@@ -497,7 +497,7 @@ class PlatformEmailCampaignController extends Controller
         ]);
         $accounts = OutreachEmailAccount::query()
             ->where('user_id', auth()->id())
-            ->where('provider', 'mailgun')
+            ->where('provider', 'bird')
             ->latest()
             ->get()
             ->map(fn (OutreachEmailAccount $account): array => [
@@ -567,18 +567,18 @@ class PlatformEmailCampaignController extends Controller
                 'sent_today_count' => $selectedCampaign->sent_today_count,
                 'steps' => $selectedCampaign->steps->map->only(['id', 'position', 'delay_days', 'subject', 'body'])->values(),
             ] : null,
-            'mailgun_configured' => $this->mailgunConfigured(),
-            'mailgun_domain' => config('services.mailgun.domain'),
-            'mailgun_inbound_domain' => config('services.mailgun.inbound_domain'),
+            'bird_configured' => $this->birdConfigured(),
+            'bird_domain' => config('services.bird.sending_domain'),
+            'bird_inbound_domain' => config('services.bird.inbound_domain'),
         ]);
     }
 
-    private function mailgunConfigured(): bool
+    private function birdConfigured(): bool
     {
-        return filled(config('services.mailgun.domain'))
-            && filled(config('services.mailgun.secret'))
-            && filled(config('services.mailgun.webhook_signing_key'))
-            && filled(config('services.mailgun.inbound_domain'));
+        return filled(config('services.bird.api_key'))
+            && filled(config('services.bird.sending_domain'))
+            && filled(config('services.bird.webhook_secret'))
+            && filled(config('services.bird.inbound_domain'));
     }
 
     /** @param array<string,string> $record @param array<int,string> $keys */

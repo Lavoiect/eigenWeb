@@ -9,7 +9,7 @@ use App\Http\Controllers\OrganizationPathwayController;
 use App\Http\Controllers\OrganizationReportingController;
 use App\Http\Controllers\OrganizationResourceController;
 use App\Http\Controllers\OrganizationUserController;
-use App\Http\Controllers\OutreachMailgunWebhookController;
+use App\Http\Controllers\OutreachBirdWebhookController;
 use App\Http\Controllers\OutreachUnsubscribeController;
 use App\Http\Controllers\PlatformEmailCampaignController;
 use App\Http\Controllers\PlatformOrganizationController;
@@ -24,10 +24,8 @@ Route::post('invitations/{invite:token}/switch-account', [OrganizationInvitation
     ->name('invitations.switch-account');
 Route::get('outreach/unsubscribe/{token}', OutreachUnsubscribeController::class)
     ->name('outreach.unsubscribe');
-Route::post('webhooks/mailgun/inbound', [OutreachMailgunWebhookController::class, 'inbound'])
-    ->name('webhooks.mailgun.inbound');
-Route::post('webhooks/mailgun/events', [OutreachMailgunWebhookController::class, 'event'])
-    ->name('webhooks.mailgun.events');
+Route::post('webhooks/bird', OutreachBirdWebhookController::class)
+    ->name('webhooks.bird');
 
 Route::middleware(['auth', 'verified', 'password.changed'])->group(function () {
     Route::prefix('platform')

@@ -8,7 +8,7 @@ use App\Models\OutreachEmailAccount;
 use App\Models\OutreachLead;
 use App\Models\OutreachMessage;
 use App\Models\User;
-use App\Services\OutreachMailgunService;
+use App\Services\OutreachBirdService;
 use App\Services\OutreachPersonalization;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as ClientRequest;
@@ -22,12 +22,12 @@ uses(RefreshDatabase::class);
 
 beforeEach(function () {
     config([
-        'services.mailgun.domain' => 'mg.eigen.test',
-        'services.mailgun.secret' => 'mailgun-api-key',
-        'services.mailgun.endpoint' => 'https://api.mailgun.net',
-        'services.mailgun.webhook_signing_key' => 'mailgun-signing-key',
-        'services.mailgun.inbound_domain' => 'reply.mg.eigen.test',
-        'services.mailgun.from_name' => 'Eigen Learning',
+        'services.bird.api_key' => 'bk_us1_bird-api-key',
+        'services.bird.endpoint' => 'https://us1.platform.bird.com',
+        'services.bird.sending_domain' => 'eigen.test',
+        'services.bird.webhook_secret' => 'whsec_'.base64_encode('bird-webhook-secret'),
+        'services.bird.inbound_domain' => 'reply.eigen.test',
+        'services.bird.from_name' => 'Eigen Learning',
     ]);
 });
 
@@ -35,8 +35,8 @@ function outreachAccount(User $user): OutreachEmailAccount
 {
     return OutreachEmailAccount::create([
         'user_id' => $user->id,
-        'provider' => 'mailgun',
-        'email' => 'sender@mg.eigen.test',
+        'provider' => 'bird',
+        'email' => 'sender@eigen.test',
         'access_token' => 'configured-in-environment',
         'status' => 'connected',
         'daily_limit' => 25,
@@ -56,6 +56,21 @@ function outreachLead(User $user, array $attributes = []): OutreachLead
         'status' => $attributes['status'] ?? 'new',
         'unsubscribe_token' => $attributes['unsubscribe_token'] ?? str_repeat('a', 48),
     ]);
+}
+
+/** @param array<string,mixed> $payload @return array<string,string> */
+function birdWebhookHeaders(array $payload): array
+{
+    $id = 'whd_'.str_repeat('a', 24);
+    $timestamp = (string) time();
+    $rawBody = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    $signature = base64_encode(hash_hmac('sha256', "{$id}.{$timestamp}.{$rawBody}", 'bird-webhook-secret', true));
+
+    return [
+        'webhook-id' => $id,
+        'webhook-timestamp' => $timestamp,
+        'webhook-signature' => 'v1,'.$signature,
+    ];
 }
 
 test('email campaign management is restricted to Eigen Super Admins', function () {
@@ -218,7 +233,7 @@ test('debug send now queues every eligible pending lead and bypasses delivery li
         ->and($middleware[0])->toBeInstanceOf(WithoutOverlapping::class);
 });
 
-test('a Super Admin can add only a sender on the configured Mailgun domain', function () {
+test('a Super Admin can add only a sender on the configured Bird domain', function () {
     $superAdmin = User::factory()->superAdmin()->create();
 
     $this->actingAs($superAdmin)
@@ -229,14 +244,14 @@ test('a Super Admin can add only a sender on the configured Mailgun domain', fun
         ->assertSessionHasErrors('email');
 
     $this->post(route('platform.email-campaigns.accounts.store'), [
-        'email' => 'outreach@mg.eigen.test',
+        'email' => 'outreach@eigen.test',
         'daily_limit' => 30,
     ])->assertSessionHasNoErrors();
 
     $this->assertDatabaseHas('outreach_email_accounts', [
         'user_id' => $superAdmin->id,
-        'provider' => 'mailgun',
-        'email' => 'outreach@mg.eigen.test',
+        'provider' => 'bird',
+        'email' => 'outreach@eigen.test',
         'daily_limit' => 30,
         'status' => 'connected',
     ]);
@@ -286,14 +301,14 @@ test('a forced campaign email bypasses daily limits, is personalized, and comple
     ]);
 
     Http::fake([
-        'https://api.mailgun.net/v3/mg.eigen.test/messages' => Http::response([
-            'id' => '<mailgun-message-1@mg.eigen.test>',
-            'message' => 'Queued. Thank you.',
-        ]),
+        'https://us1.platform.bird.com/v1/email/messages' => Http::response([
+            'id' => 'em_bird_message_1',
+            'status' => 'accepted',
+        ], 202),
     ]);
 
     (new SendOutreachEmail($contact->id, true))->handle(
-        app(OutreachMailgunService::class),
+        app(OutreachBirdService::class),
         app(OutreachPersonalization::class),
     );
 
@@ -306,14 +321,16 @@ test('a forced campaign email bypasses daily limits, is personalized, and comple
         ->and($lead->refresh()->status)->toBe('active')
         ->and(OutreachMessage::query()->count())->toBe(2);
 
-    Http::assertSent(fn (ClientRequest $request): bool => $request->url() === 'https://api.mailgun.net/v3/mg.eigen.test/messages'
-        && str_starts_with($request->header('Content-Type')[0] ?? '', 'multipart/form-data; boundary=')
-        && str_contains($request->body(), 'mike@example.com')
-        && str_contains($request->body(), 'Quick question for ABC Telecom')
-        && str_contains($request->body(), 'reply+'.$contact->id.'.'));
+    Http::assertSent(fn (ClientRequest $request): bool => $request->url() === 'https://us1.platform.bird.com/v1/email/messages'
+        && $request->hasHeader('Authorization', 'Bearer bk_us1_bird-api-key')
+        && $request['to'] === ['mike@example.com']
+        && $request['subject'] === 'Quick question for ABC Telecom'
+        && str_starts_with($request['reply_to'][0], 'reply+'.$contact->id.'.')
+        && $request['metadata']['campaign_contact_id'] === $contact->id
+        && $request['category'] === 'marketing');
 });
 
-test('a signed Mailgun inbound reply stops the sequence and appears in the inbox', function () {
+test('a signed Bird inbound reply stops the sequence and appears in the inbox', function () {
     $superAdmin = User::factory()->superAdmin()->create();
     $account = outreachAccount($superAdmin);
     $lead = outreachLead($superAdmin);
@@ -334,21 +351,29 @@ test('a signed Mailgun inbound reply stops the sequence and appears in the inbox
         'current_step' => 1,
         'next_send_at' => now()->addDays(3),
     ]);
-    $mailgun = app(OutreachMailgunService::class);
-    $timestamp = (string) time();
-    $token = 'mailgun-webhook-token';
-    $signature = hash_hmac('sha256', $timestamp.$token, 'mailgun-signing-key');
+    $bird = app(OutreachBirdService::class);
+    $payload = [
+        'type' => 'email.received',
+        'timestamp' => now()->toIso8601String(),
+        'data' => [
+            'inbound_message_id' => 'in_bird_reply_1',
+            'to' => [$bird->replyAddress($contact)],
+            'from' => 'mike@example.com',
+            'subject' => 'Re: Quick question',
+            'in_reply_to' => 'em_bird_message_1',
+        ],
+    ];
 
-    $this->post(route('webhooks.mailgun.inbound'), [
-        'timestamp' => $timestamp,
-        'token' => $token,
-        'signature' => $signature,
-        'recipient' => $mailgun->replyAddress($contact),
-        'sender' => 'mike@example.com',
-        'subject' => 'Re: Quick question',
-        'stripped-text' => 'Yes, I would like to learn more.',
-        'Message-Id' => '<reply-1@customer.test>',
-    ])->assertOk()->assertJson(['accepted' => true, 'matched' => true]);
+    Http::fake([
+        'https://us1.platform.bird.com/v1/email/inbound-messages/in_bird_reply_1/body' => Http::response([
+            'text' => 'Yes, I would like to learn more.',
+        ]),
+    ]);
+
+    $this->withHeaders(birdWebhookHeaders($payload))
+        ->postJson(route('webhooks.bird'), $payload)
+        ->assertOk()
+        ->assertJson(['accepted' => true, 'matched' => true]);
 
     expect($contact->refresh()->status)->toBe('replied')
         ->and($contact->next_send_at)->toBeNull()
@@ -356,22 +381,25 @@ test('a signed Mailgun inbound reply stops the sequence and appears in the inbox
         ->and($campaign->refresh()->status)->toBe('completed');
 
     $this->assertDatabaseHas('outreach_messages', [
-        'provider_message_id' => 'reply-1@customer.test',
+        'provider_message_id' => 'in_bird_reply_1',
         'direction' => 'inbound',
+        'body' => 'Yes, I would like to learn more.',
         'status' => 'received',
     ]);
 });
 
-test('Mailgun webhooks reject an invalid signature', function () {
-    $this->post(route('webhooks.mailgun.inbound'), [
-        'timestamp' => (string) time(),
-        'token' => 'forged-token',
-        'signature' => 'forged-signature',
-        'recipient' => 'reply+1.invalid@reply.mg.eigen.test',
+test('Bird webhooks reject an invalid signature', function () {
+    $this->withHeaders([
+        'webhook-id' => 'whd_forged',
+        'webhook-timestamp' => (string) time(),
+        'webhook-signature' => 'v1,forged-signature',
+    ])->postJson(route('webhooks.bird'), [
+        'type' => 'email.received',
+        'data' => ['inbound_message_id' => 'in_forged'],
     ])->assertForbidden();
 });
 
-test('a permanent Mailgun delivery failure stops the sequence as bounced', function () {
+test('a Bird bounce stops the sequence as bounced', function () {
     $superAdmin = User::factory()->superAdmin()->create();
     $account = outreachAccount($superAdmin);
     $lead = outreachLead($superAdmin);
@@ -391,21 +419,21 @@ test('a permanent Mailgun delivery failure stops the sequence as bounced', funct
         'current_step' => 1,
         'next_send_at' => now()->addDay(),
     ]);
-    $timestamp = (string) time();
-    $token = 'event-token';
+    $payload = [
+        'type' => 'email.bounced',
+        'timestamp' => now()->toIso8601String(),
+        'data' => [
+            'email_id' => 'em_bounced',
+            'recipient' => $lead->email,
+            'bounce_type' => 'hard',
+            'metadata' => ['campaign_contact_id' => $contact->id],
+        ],
+    ];
 
-    $this->postJson(route('webhooks.mailgun.events'), [
-        'signature' => [
-            'timestamp' => $timestamp,
-            'token' => $token,
-            'signature' => hash_hmac('sha256', $timestamp.$token, 'mailgun-signing-key'),
-        ],
-        'event-data' => [
-            'event' => 'failed',
-            'severity' => 'permanent',
-            'user-variables' => ['campaign_contact_id' => (string) $contact->id],
-        ],
-    ])->assertOk()->assertJson(['accepted' => true]);
+    $this->withHeaders(birdWebhookHeaders($payload))
+        ->postJson(route('webhooks.bird'), $payload)
+        ->assertOk()
+        ->assertJson(['accepted' => true]);
 
     expect($contact->refresh()->status)->toBe('bounced')
         ->and($lead->refresh()->status)->toBe('bounced')

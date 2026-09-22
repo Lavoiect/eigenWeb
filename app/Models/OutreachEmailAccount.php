@@ -42,7 +42,7 @@ class OutreachEmailAccount extends Model
 
     public function isConnected(): bool
     {
-        return $this->provider === 'mailgun'
+        return $this->provider === 'bird'
             && $this->status === 'connected'
             && filled($this->access_token);
     }

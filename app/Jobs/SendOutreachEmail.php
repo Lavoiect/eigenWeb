@@ -4,7 +4,7 @@ namespace App\Jobs;
 
 use App\Models\OutreachCampaignContact;
 use App\Models\OutreachMessage;
-use App\Services\OutreachMailgunService;
+use App\Services\OutreachBirdService;
 use App\Services\OutreachPersonalization;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -36,7 +36,7 @@ class SendOutreachEmail implements ShouldQueue
         ];
     }
 
-    public function handle(OutreachMailgunService $mailgun, OutreachPersonalization $personalization): void
+    public function handle(OutreachBirdService $bird, OutreachPersonalization $personalization): void
     {
         $contact = OutreachCampaignContact::query()
             ->with(['campaign.emailAccount', 'campaign.steps', 'lead'])
@@ -92,7 +92,7 @@ class SendOutreachEmail implements ShouldQueue
         $body .= "\n\n---\nIf you would rather not receive these emails, unsubscribe: ".url('/outreach/unsubscribe/'.$lead->unsubscribe_token);
 
         try {
-            $providerMessage = $mailgun->send($account, $contact, $lead->email, $subject, $body);
+            $providerMessage = $bird->send($account, $contact, $lead->email, $subject, $body);
             $sentAt = now();
 
             OutreachMessage::create([

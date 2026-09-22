@@ -21,7 +21,7 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
-        $middleware->validateCsrfTokens(except: ['webhooks/mailgun/*']);
+        $middleware->validateCsrfTokens(except: ['webhooks/bird']);
         $middleware->alias([
             'organization.admin' => EnsureOrganizationAdmin::class,
             'user.active' => EnsureUserIsActive::class,

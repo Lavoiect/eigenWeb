@@ -41,12 +41,12 @@ return [
         'api_secret' => env('CLOUDINARY_API_SECRET'),
     ],
 
-    'mailgun' => [
-        'domain' => env('MAILGUN_DOMAIN'),
-        'secret' => env('MAILGUN_SECRET'),
-        'endpoint' => env('MAILGUN_ENDPOINT', 'https://api.mailgun.net'),
-        'webhook_signing_key' => env('MAILGUN_WEBHOOK_SIGNING_KEY'),
-        'inbound_domain' => env('MAILGUN_INBOUND_DOMAIN', env('MAILGUN_DOMAIN')),
+    'bird' => [
+        'api_key' => env('BIRD_API_KEY'),
+        'endpoint' => env('BIRD_ENDPOINT'),
+        'sending_domain' => env('BIRD_SENDING_DOMAIN'),
+        'inbound_domain' => env('BIRD_INBOUND_DOMAIN'),
+        'webhook_secret' => env('BIRD_WEBHOOK_SECRET'),
         'from_name' => env('MAIL_FROM_NAME', env('APP_NAME')),
     ],
 
