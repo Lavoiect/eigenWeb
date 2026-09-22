@@ -287,6 +287,25 @@ test('the Bird webhook setup command creates the Eigen endpoint and returns its 
         && $request['events'] === OutreachBirdService::WEBHOOK_EVENTS);
 });
 
+test('the Bird webhook setup command explains missing API key scopes', function () {
+    Http::fake([
+        'https://us1.platform.bird.com/v1/webhooks*' => Http::response([
+            'error' => [
+                'message' => 'This request requires the "webhooks:read" scope.',
+                'remediation' => 'Use a credential with the required scope.',
+            ],
+        ], 403),
+    ]);
+
+    $this->artisan('outreach:configure-bird-webhook', [
+        '--url' => 'https://eigen-learning.com/webhooks/bird',
+        '--no-write' => true,
+        '--skip-test' => true,
+    ])
+        ->expectsOutput('Bird could not list webhooks: This request requires the "webhooks:read" scope. Use a credential with the required scope.')
+        ->assertFailed();
+});
+
 test('a forced campaign email bypasses daily limits, is personalized, and completes its sequence', function () {
     $superAdmin = User::factory()->superAdmin()->create();
     $account = outreachAccount($superAdmin);

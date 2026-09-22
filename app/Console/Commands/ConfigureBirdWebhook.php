@@ -28,7 +28,9 @@ class ConfigureBirdWebhook extends Command
         $url = trim((string) ($this->option('url') ?: rtrim((string) config('app.url'), '/').'/webhooks/bird'));
 
         if (! filter_var($url, FILTER_VALIDATE_URL) || ! str_starts_with($url, 'https://')) {
-            $this->error('The Bird webhook URL must be a public HTTPS URL.');
+            $this->error('The Bird webhook URL must be a public HTTPS URL. For production run:');
+            $this->line('php artisan outreach:configure-bird-webhook --url=https://eigen-learning.com/webhooks/bird');
+            $this->line('For local webhook delivery, pass the HTTPS URL from a tunnel such as Cloudflare Tunnel or ngrok.');
 
             return self::FAILURE;
         }

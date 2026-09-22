@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\OutreachCampaignContact;
 use App\Models\OutreachEmailAccount;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
@@ -67,7 +68,7 @@ class OutreachBirdService
             ]);
 
         if ($response->failed() || blank($response->json('id'))) {
-            throw new RuntimeException('Bird could not send the message: '.$response->body());
+            throw $this->birdError($response, 'send the message');
         }
 
         return [
@@ -87,7 +88,7 @@ class OutreachBirdService
             ->get($this->endpoint().'/v1/email/inbound-messages/'.urlencode($inboundMessageId).'/body');
 
         if ($response->failed()) {
-            throw new RuntimeException('Bird could not retrieve the inbound message body: '.$response->body());
+            throw $this->birdError($response, 'retrieve the inbound message body');
         }
 
         return [
@@ -125,7 +126,7 @@ class OutreachBirdService
         ]);
 
         if ($response->failed()) {
-            throw new RuntimeException('Bird could not list webhooks: '.$response->body());
+            throw $this->birdError($response, 'list webhooks');
         }
 
         return (array) $response->json('data', []);
@@ -143,7 +144,7 @@ class OutreachBirdService
             ]);
 
         if ($response->failed() || blank($response->json('id')) || blank($response->json('secret'))) {
-            throw new RuntimeException('Bird could not create the webhook: '.$response->body());
+            throw $this->birdError($response, 'create the webhook');
         }
 
         return $response->json();
@@ -160,7 +161,7 @@ class OutreachBirdService
         ]);
 
         if ($response->failed()) {
-            throw new RuntimeException('Bird could not update the webhook: '.$response->body());
+            throw $this->birdError($response, 'update the webhook');
         }
 
         return $response->json();
@@ -174,7 +175,7 @@ class OutreachBirdService
         $secret = (string) $response->json('secret');
 
         if ($response->failed() || $secret === '') {
-            throw new RuntimeException('Bird could not rotate the webhook secret: '.$response->body());
+            throw $this->birdError($response, 'rotate the webhook secret');
         }
 
         return $secret;
@@ -189,7 +190,7 @@ class OutreachBirdService
         );
 
         if ($response->failed()) {
-            throw new RuntimeException('Bird could not test the webhook: '.$response->body());
+            throw $this->birdError($response, 'test the webhook');
         }
 
         return $response->json();
@@ -253,5 +254,16 @@ class OutreachBirdService
         if (blank(config('services.bird.api_key'))) {
             throw new RuntimeException('Bird is not configured.');
         }
+    }
+
+    private function birdError(Response $response, string $action): RuntimeException
+    {
+        $message = (string) $response->json('error.message');
+        $remediation = (string) $response->json('error.remediation');
+        $details = trim($message.' '.$remediation);
+
+        return new RuntimeException(
+            'Bird could not '.$action.($details !== '' ? ': '.$details : ': '.$response->body()),
+        );
     }
 }
