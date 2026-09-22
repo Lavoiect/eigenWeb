@@ -8,6 +8,7 @@ use App\Services\OutreachMailgunService;
 use App\Services\OutreachPersonalization;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Carbon;
 use Throwable;
 
@@ -24,6 +25,16 @@ class SendOutreachEmail implements ShouldQueue
         public int $campaignContactId,
         public bool $force = false,
     ) {}
+
+    /** @return array<int,object> */
+    public function middleware(): array
+    {
+        return [
+            (new WithoutOverlapping('outreach-contact-'.$this->campaignContactId))
+                ->releaseAfter(30)
+                ->expireAfter(120),
+        ];
+    }
 
     public function handle(OutreachMailgunService $mailgun, OutreachPersonalization $personalization): void
     {

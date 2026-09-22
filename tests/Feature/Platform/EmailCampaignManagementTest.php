@@ -13,6 +13,7 @@ use App\Services\OutreachPersonalization;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -175,7 +176,7 @@ test('debug send now queues every eligible pending lead and bypasses delivery li
     ]);
     $pendingContact = $campaign->contacts()->create([
         'lead_id' => $pendingLead->id,
-        'status' => 'active',
+        'status' => 'sending',
         'current_step' => 0,
         'next_send_at' => now()->addMonth(),
     ]);
@@ -209,6 +210,10 @@ test('debug send now queues every eligible pending lead and bypasses delivery li
     Queue::assertPushed(SendOutreachEmail::class, fn (SendOutreachEmail $job): bool => $job->campaignContactId === $pendingContact->id && $job->force);
     Queue::assertPushed(SendOutreachEmail::class, fn (SendOutreachEmail $job): bool => $job->campaignContactId === $pausedContact->id && $job->force);
     Queue::assertPushed(SendOutreachEmail::class, fn (SendOutreachEmail $job): bool => $job->campaignContactId === $unattachedContact->id && $job->force);
+
+    $middleware = (new SendOutreachEmail($pendingContact->id, true))->middleware();
+    expect($middleware)->toHaveCount(1)
+        ->and($middleware[0])->toBeInstanceOf(WithoutOverlapping::class);
 });
 
 test('a Super Admin can add only a sender on the configured Mailgun domain', function () {

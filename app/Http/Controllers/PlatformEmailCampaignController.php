@@ -366,7 +366,7 @@ class PlatformEmailCampaignController extends Controller
 
         $queued = 0;
         $campaign->contacts()
-            ->whereIn('status', ['queued', 'active', 'paused'])
+            ->whereIn('status', ['queued', 'active', 'sending', 'paused'])
             ->where('current_step', '<', $campaign->steps->count())
             ->whereHas('lead', fn ($query) => $query->whereNotIn('status', ['replied', 'not_interested', 'bounced', 'unsubscribed']))
             ->select('id')
@@ -374,7 +374,7 @@ class PlatformEmailCampaignController extends Controller
                 foreach ($contacts as $contact) {
                     $claimed = OutreachCampaignContact::query()
                         ->whereKey($contact->getKey())
-                        ->whereIn('status', ['queued', 'active', 'paused'])
+                        ->whereIn('status', ['queued', 'active', 'sending', 'paused'])
                         ->update(['status' => 'sending', 'next_send_at' => now()]);
 
                     if ($claimed === 1) {
@@ -518,7 +518,7 @@ class PlatformEmailCampaignController extends Controller
                 'contacts',
                 'contacts as active_count' => fn ($query) => $query->whereIn('status', ['active', 'sending']),
                 'contacts as sendable_count' => fn ($query) => $query
-                    ->whereIn('status', ['queued', 'active', 'paused'])
+                    ->whereIn('status', ['queued', 'active', 'sending', 'paused'])
                     ->where('current_step', '<', $selectedCampaign->steps->count())
                     ->whereHas('lead', fn ($leadQuery) => $leadQuery->whereNotIn('status', ['replied', 'not_interested', 'bounced', 'unsubscribed'])),
                 'contacts as replied_count' => fn ($query) => $query->where('status', 'replied'),
