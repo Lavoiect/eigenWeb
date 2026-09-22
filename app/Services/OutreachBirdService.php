@@ -4,11 +4,23 @@ namespace App\Services;
 
 use App\Models\OutreachCampaignContact;
 use App\Models\OutreachEmailAccount;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
 class OutreachBirdService
 {
+    /** @var array<int,string> */
+    public const WEBHOOK_EVENTS = [
+        'email.received',
+        'email.bounced',
+        'email.out_of_band_bounce',
+        'email.rejected',
+        'email.complained',
+        'email.unsubscribed',
+        'email.list_unsubscribed',
+    ];
+
     /** @return array{id:string,threadId:string} */
     public function send(
         OutreachEmailAccount $account,
@@ -105,6 +117,84 @@ class OutreachBirdService
         return substr(hash_hmac('sha256', (string) $contactId, (string) config('app.key')), 0, 24);
     }
 
+    /** @return array<int,array<string,mixed>> */
+    public function webhooks(): array
+    {
+        $response = $this->client()->get($this->endpoint().'/v1/webhooks', [
+            'limit' => 100,
+        ]);
+
+        if ($response->failed()) {
+            throw new RuntimeException('Bird could not list webhooks: '.$response->body());
+        }
+
+        return (array) $response->json('data', []);
+    }
+
+    /** @return array<string,mixed> */
+    public function createWebhook(string $url): array
+    {
+        $response = $this->client()
+            ->withHeaders(['Idempotency-Key' => 'eigen-outreach-webhook'])
+            ->post($this->endpoint().'/v1/webhooks', [
+                'url' => $url,
+                'events' => self::WEBHOOK_EVENTS,
+                'description' => 'Eigen outreach replies and delivery events',
+            ]);
+
+        if ($response->failed() || blank($response->json('id')) || blank($response->json('secret'))) {
+            throw new RuntimeException('Bird could not create the webhook: '.$response->body());
+        }
+
+        return $response->json();
+    }
+
+    /** @return array<string,mixed> */
+    public function updateWebhook(string $webhookId, string $url): array
+    {
+        $response = $this->client()->patch($this->endpoint().'/v1/webhooks/'.urlencode($webhookId), [
+            'url' => $url,
+            'events' => self::WEBHOOK_EVENTS,
+            'description' => 'Eigen outreach replies and delivery events',
+            'status' => 'active',
+        ]);
+
+        if ($response->failed()) {
+            throw new RuntimeException('Bird could not update the webhook: '.$response->body());
+        }
+
+        return $response->json();
+    }
+
+    public function rotateWebhookSecret(string $webhookId): string
+    {
+        $response = $this->client()->post(
+            $this->endpoint().'/v1/webhooks/'.urlencode($webhookId).'/rotate-secret',
+        );
+        $secret = (string) $response->json('secret');
+
+        if ($response->failed() || $secret === '') {
+            throw new RuntimeException('Bird could not rotate the webhook secret: '.$response->body());
+        }
+
+        return $secret;
+    }
+
+    /** @return array<string,mixed> */
+    public function testWebhook(string $webhookId): array
+    {
+        $response = $this->client()->post(
+            $this->endpoint().'/v1/webhooks/'.urlencode($webhookId).'/test',
+            ['event_type' => 'email.bounced'],
+        );
+
+        if ($response->failed()) {
+            throw new RuntimeException('Bird could not test the webhook: '.$response->body());
+        }
+
+        return $response->json();
+    }
+
     public function webhookIsValid(string $rawBody, string $id, string $timestamp, string $signatureHeader): bool
     {
         $secret = (string) config('services.bird.webhook_secret');
@@ -146,6 +236,16 @@ class OutreachBirdService
         return str_starts_with((string) config('services.bird.api_key'), 'bk_eu1_')
             ? 'https://eu1.platform.bird.com'
             : 'https://us1.platform.bird.com';
+    }
+
+    private function client(): PendingRequest
+    {
+        $this->assertConfigured();
+
+        return Http::acceptJson()
+            ->asJson()
+            ->withToken((string) config('services.bird.api_key'))
+            ->timeout(30);
     }
 
     private function assertConfigured(): void

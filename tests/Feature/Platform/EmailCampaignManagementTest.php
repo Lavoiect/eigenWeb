@@ -257,6 +257,36 @@ test('a Super Admin can add only a sender on the configured Bird domain', functi
     ]);
 });
 
+test('the Bird webhook setup command creates the Eigen endpoint and returns its secret', function () {
+    Http::fake(function (ClientRequest $request) {
+        if ($request->method() === 'GET') {
+            return Http::response(['data' => []]);
+        }
+
+        return Http::response([
+            'id' => 'whk_eigen_outreach',
+            'url' => 'https://eigen-learning.com/webhooks/bird',
+            'events' => OutreachBirdService::WEBHOOK_EVENTS,
+            'status' => 'active',
+            'secret' => 'whsec_created-secret',
+        ]);
+    });
+
+    $this->artisan('outreach:configure-bird-webhook', [
+        '--url' => 'https://eigen-learning.com/webhooks/bird',
+        '--no-write' => true,
+        '--skip-test' => true,
+    ])
+        ->expectsOutput('Created Bird webhook whk_eigen_outreach.')
+        ->expectsOutput('BIRD_WEBHOOK_SECRET=whsec_created-secret')
+        ->assertSuccessful();
+
+    Http::assertSent(fn (ClientRequest $request): bool => $request->method() === 'POST'
+        && $request->url() === 'https://us1.platform.bird.com/v1/webhooks'
+        && $request['url'] === 'https://eigen-learning.com/webhooks/bird'
+        && $request['events'] === OutreachBirdService::WEBHOOK_EVENTS);
+});
+
 test('a forced campaign email bypasses daily limits, is personalized, and completes its sequence', function () {
     $superAdmin = User::factory()->superAdmin()->create();
     $account = outreachAccount($superAdmin);
