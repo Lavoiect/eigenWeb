@@ -133,6 +133,76 @@ test('a Super Admin can create and start a campaign sequence', function () {
     Queue::assertPushed(SendOutreachEmail::class, fn (SendOutreachEmail $job): bool => $job->campaignContactId === $campaign->contacts()->firstOrFail()->id);
 });
 
+test('debug send now queues every eligible pending lead and bypasses delivery limits', function () {
+    Queue::fake();
+    $superAdmin = User::factory()->superAdmin()->create();
+    $account = outreachAccount($superAdmin);
+    $account->update(['daily_limit' => 1]);
+    $campaign = OutreachCampaign::create([
+        'created_by_id' => $superAdmin->id,
+        'email_account_id' => $account->id,
+        'name' => 'Immediate debug send',
+        'status' => 'active',
+        'daily_limit' => 1,
+        'timezone' => 'America/New_York',
+        'sending_start' => '23:00:00',
+        'sending_end' => '23:30:00',
+        'sending_days' => [7],
+        'started_at' => now(),
+    ]);
+    $campaign->steps()->create([
+        'position' => 1,
+        'delay_days' => 0,
+        'subject' => 'Quick question',
+        'body' => 'Hi {{first_name}}',
+    ]);
+    $pendingLead = outreachLead($superAdmin, [
+        'email' => 'pending@example.com',
+        'unsubscribe_token' => str_repeat('p', 48),
+    ]);
+    $pausedLead = outreachLead($superAdmin, [
+        'email' => 'paused@example.com',
+        'unsubscribe_token' => str_repeat('s', 48),
+    ]);
+    $repliedLead = outreachLead($superAdmin, [
+        'email' => 'replied@example.com',
+        'status' => 'replied',
+        'unsubscribe_token' => str_repeat('r', 48),
+    ]);
+    $pendingContact = $campaign->contacts()->create([
+        'lead_id' => $pendingLead->id,
+        'status' => 'active',
+        'current_step' => 0,
+        'next_send_at' => now()->addMonth(),
+    ]);
+    $pausedContact = $campaign->contacts()->create([
+        'lead_id' => $pausedLead->id,
+        'status' => 'paused',
+        'current_step' => 0,
+        'next_send_at' => now()->addMonth(),
+    ]);
+    $repliedContact = $campaign->contacts()->create([
+        'lead_id' => $repliedLead->id,
+        'status' => 'replied',
+        'current_step' => 0,
+        'next_send_at' => null,
+    ]);
+
+    $this->actingAs($superAdmin)
+        ->post(route('platform.email-campaigns.campaigns.debug-send-now', $campaign))
+        ->assertSessionHasNoErrors()
+        ->assertSessionHas('status', 'Queued 2 pending campaign emails for immediate sending.');
+
+    expect($pendingContact->refresh()->status)->toBe('sending')
+        ->and($pendingContact->next_send_at)->not->toBeNull()
+        ->and($pausedContact->refresh()->status)->toBe('sending')
+        ->and($repliedContact->refresh()->status)->toBe('replied');
+
+    Queue::assertPushed(SendOutreachEmail::class, 2);
+    Queue::assertPushed(SendOutreachEmail::class, fn (SendOutreachEmail $job): bool => $job->campaignContactId === $pendingContact->id && $job->force);
+    Queue::assertPushed(SendOutreachEmail::class, fn (SendOutreachEmail $job): bool => $job->campaignContactId === $pausedContact->id && $job->force);
+});
+
 test('a Super Admin can add only a sender on the configured Mailgun domain', function () {
     $superAdmin = User::factory()->superAdmin()->create();
 
@@ -157,16 +227,17 @@ test('a Super Admin can add only a sender on the configured Mailgun domain', fun
     ]);
 });
 
-test('a due campaign email is personalized sent and completes its sequence', function () {
+test('a forced campaign email bypasses daily limits, is personalized, and completes its sequence', function () {
     $superAdmin = User::factory()->superAdmin()->create();
     $account = outreachAccount($superAdmin);
+    $account->update(['daily_limit' => 1]);
     $lead = outreachLead($superAdmin);
     $campaign = OutreachCampaign::create([
         'created_by_id' => $superAdmin->id,
         'email_account_id' => $account->id,
         'name' => 'Telecom outreach',
         'status' => 'active',
-        'daily_limit' => 25,
+        'daily_limit' => 1,
         'timezone' => 'America/New_York',
         'sending_start' => '09:00:00',
         'sending_end' => '17:00:00',
@@ -185,6 +256,19 @@ test('a due campaign email is personalized sent and completes its sequence', fun
         'current_step' => 0,
         'next_send_at' => now(),
     ]);
+    OutreachMessage::create([
+        'email_account_id' => $account->id,
+        'campaign_id' => $campaign->id,
+        'campaign_contact_id' => $contact->id,
+        'lead_id' => $lead->id,
+        'campaign_step_id' => $step->id,
+        'direction' => 'outbound',
+        'provider_message_id' => 'earlier-message',
+        'subject' => 'Earlier message',
+        'body' => 'This message already reached the daily limit.',
+        'status' => 'sent',
+        'sent_at' => now(),
+    ]);
 
     Http::fake([
         'https://api.mailgun.net/v3/mg.eigen.test/messages' => Http::response([
@@ -193,23 +277,25 @@ test('a due campaign email is personalized sent and completes its sequence', fun
         ]),
     ]);
 
-    (new SendOutreachEmail($contact->id))->handle(
+    (new SendOutreachEmail($contact->id, true))->handle(
         app(OutreachMailgunService::class),
         app(OutreachPersonalization::class),
     );
 
-    $message = OutreachMessage::query()->firstOrFail();
+    $message = OutreachMessage::query()->latest('id')->firstOrFail();
     expect($message->campaign_step_id)->toBe($step->id)
         ->and($message->subject)->toBe('Quick question for ABC Telecom')
         ->and($message->body)->toContain('Hi Mike, can we talk?')
         ->and($contact->refresh()->status)->toBe('completed')
         ->and($campaign->refresh()->status)->toBe('completed')
-        ->and($lead->refresh()->status)->toBe('active');
+        ->and($lead->refresh()->status)->toBe('active')
+        ->and(OutreachMessage::query()->count())->toBe(2);
 
     Http::assertSent(fn (ClientRequest $request): bool => $request->url() === 'https://api.mailgun.net/v3/mg.eigen.test/messages'
-        && $request['to'] === 'mike@example.com'
-        && $request['subject'] === 'Quick question for ABC Telecom'
-        && str_starts_with((string) $request['h:Reply-To'], 'reply+'.$contact->id.'.'));
+        && str_starts_with($request->header('Content-Type')[0] ?? '', 'multipart/form-data; boundary=')
+        && str_contains($request->body(), 'mike@example.com')
+        && str_contains($request->body(), 'Quick question for ABC Telecom')
+        && str_contains($request->body(), 'reply+'.$contact->id.'.'));
 });
 
 test('a signed Mailgun inbound reply stops the sequence and appears in the inbox', function () {

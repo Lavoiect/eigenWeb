@@ -3,6 +3,7 @@ import {
     Activity,
     ArrowRight,
     BarChart3,
+    Bug,
     CalendarClock,
     Check,
     Clock3,
@@ -133,6 +134,7 @@ type SelectedCampaign = {
     sending_end: string;
     contacts_count: number;
     active_count: number;
+    sendable_count: number;
     replied_count: number;
     bounced_count: number;
     sent_count: number;
@@ -940,6 +942,8 @@ function CampaignEditor({
     accounts: EmailAccount[];
 }) {
     const [steps, setSteps] = useState<CampaignStep[]>(campaign.steps);
+    const [debugSendOpen, setDebugSendOpen] = useState(false);
+    const [debugSending, setDebugSending] = useState(false);
     const editingLocked = campaign.status === 'active';
 
     const updateStep = (
@@ -990,16 +994,25 @@ function CampaignEditor({
                 </div>
                 <div className="flex gap-2">
                     {campaign.status === 'active' ? (
-                        <Button
-                            variant="outline"
-                            onClick={() =>
-                                router.post(
-                                    `/platform/email-campaigns/campaigns/${campaign.id}/pause`,
-                                )
-                            }
-                        >
-                            <Pause /> Pause campaign
-                        </Button>
+                        <>
+                            <Button
+                                variant="outline"
+                                className="border-amber-300 text-amber-800 hover:bg-amber-50 hover:text-amber-900 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-950/40"
+                                onClick={() => setDebugSendOpen(true)}
+                            >
+                                <Bug /> Debug: Send now
+                            </Button>
+                            <Button
+                                variant="outline"
+                                onClick={() =>
+                                    router.post(
+                                        `/platform/email-campaigns/campaigns/${campaign.id}/pause`,
+                                    )
+                                }
+                            >
+                                <Pause /> Pause campaign
+                            </Button>
+                        </>
                     ) : campaign.status === 'completed' ? (
                         <Button variant="outline" disabled>
                             <Check /> Campaign complete
@@ -1315,6 +1328,71 @@ function CampaignEditor({
                     </>
                 )}
             </Form>
+            <Dialog open={debugSendOpen} onOpenChange={setDebugSendOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Send all pending emails now?</DialogTitle>
+                        <DialogDescription>
+                            This debug action immediately queues the current
+                            sequence step for every eligible lead in this
+                            campaign.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <Alert className="border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+                        <Bug />
+                        <AlertTitle>
+                            Sending safeguards will be bypassed
+                        </AlertTitle>
+                        <AlertDescription>
+                            Campaign hours, scheduled follow-up dates, and both
+                            daily sending limits will be ignored for this send.
+                            Replied, bounced, unsubscribed, stopped, and
+                            completed contacts will not be sent again.
+                        </AlertDescription>
+                    </Alert>
+                    <p className="text-sm text-muted-foreground">
+                        <strong className="text-foreground">
+                            {campaign.sendable_count}
+                        </strong>{' '}
+                        pending{' '}
+                        {campaign.sendable_count === 1 ? 'lead' : 'leads'} will
+                        be queued.
+                    </p>
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            disabled={debugSending}
+                            onClick={() => setDebugSendOpen(false)}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="destructive"
+                            disabled={
+                                debugSending || campaign.sendable_count === 0
+                            }
+                            onClick={() =>
+                                router.post(
+                                    `/platform/email-campaigns/campaigns/${campaign.id}/debug-send-now`,
+                                    {},
+                                    {
+                                        preserveScroll: true,
+                                        onStart: () => setDebugSending(true),
+                                        onFinish: () => setDebugSending(false),
+                                        onSuccess: () =>
+                                            setDebugSendOpen(false),
+                                    },
+                                )
+                            }
+                        >
+                            {debugSending ? <Spinner /> : <Bug />}
+                            Send {campaign.sendable_count} now
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

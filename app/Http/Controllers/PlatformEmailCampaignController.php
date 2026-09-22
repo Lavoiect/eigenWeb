@@ -289,8 +289,9 @@ class PlatformEmailCampaignController extends Controller
     public function startCampaign(OutreachCampaign $campaign): RedirectResponse
     {
         $campaign->loadMissing(['emailAccount', 'steps']);
+        $emailAccount = $campaign->emailAccount;
 
-        if (! $campaign->emailAccount?->isConnected()) {
+        if (! $emailAccount instanceof OutreachEmailAccount || ! $emailAccount->isConnected()) {
             throw ValidationException::withMessages(['email_account_id' => 'Add a connected Mailgun sender before starting.']);
         }
 
@@ -331,6 +332,50 @@ class PlatformEmailCampaignController extends Controller
         });
 
         return back()->with('status', 'Campaign paused.');
+    }
+
+    public function debugSendNow(OutreachCampaign $campaign): RedirectResponse
+    {
+        $campaign->loadMissing(['emailAccount', 'steps']);
+        $emailAccount = $campaign->emailAccount;
+
+        if ($campaign->status !== 'active') {
+            throw ValidationException::withMessages(['campaign' => 'Start the campaign before using Debug: Send now.']);
+        }
+
+        if (! $emailAccount instanceof OutreachEmailAccount || ! $emailAccount->isConnected()) {
+            throw ValidationException::withMessages(['email_account_id' => 'Add a connected Mailgun sender before sending.']);
+        }
+
+        if ($campaign->steps->isEmpty()) {
+            throw ValidationException::withMessages(['campaign' => 'Add at least one email to this campaign before sending.']);
+        }
+
+        $queued = 0;
+        $campaign->contacts()
+            ->whereIn('status', ['queued', 'active', 'paused'])
+            ->where('current_step', '<', $campaign->steps->count())
+            ->whereHas('lead', fn ($query) => $query->whereNotIn('status', ['replied', 'not_interested', 'bounced', 'unsubscribed']))
+            ->select('id')
+            ->chunkById(100, function ($contacts) use (&$queued): void {
+                foreach ($contacts as $contact) {
+                    $claimed = OutreachCampaignContact::query()
+                        ->whereKey($contact->getKey())
+                        ->whereIn('status', ['queued', 'active', 'paused'])
+                        ->update(['status' => 'sending', 'next_send_at' => now()]);
+
+                    if ($claimed === 1) {
+                        SendOutreachEmail::dispatch($contact->getKey(), true);
+                        $queued++;
+                    }
+                }
+            });
+
+        if ($queued === 0) {
+            throw ValidationException::withMessages(['campaign' => 'There are no pending campaign emails to send right now.']);
+        }
+
+        return back()->with('status', "Queued {$queued} pending campaign emails for immediate sending.");
     }
 
     public function updateEmailAccount(Request $request, OutreachEmailAccount $account): RedirectResponse
@@ -459,6 +504,10 @@ class PlatformEmailCampaignController extends Controller
             $selectedCampaign->load(['steps', 'emailAccount'])->loadCount([
                 'contacts',
                 'contacts as active_count' => fn ($query) => $query->whereIn('status', ['active', 'sending']),
+                'contacts as sendable_count' => fn ($query) => $query
+                    ->whereIn('status', ['queued', 'active', 'paused'])
+                    ->where('current_step', '<', $selectedCampaign->steps->count())
+                    ->whereHas('lead', fn ($leadQuery) => $leadQuery->whereNotIn('status', ['replied', 'not_interested', 'bounced', 'unsubscribed'])),
                 'contacts as replied_count' => fn ($query) => $query->where('status', 'replied'),
                 'contacts as bounced_count' => fn ($query) => $query->where('status', 'bounced'),
                 'messages as sent_count' => fn ($query) => $query->where('direction', 'outbound')->where('status', 'sent'),
@@ -486,6 +535,7 @@ class PlatformEmailCampaignController extends Controller
                 ...$selectedCampaign->only(['id', 'name', 'status', 'email_account_id', 'daily_limit', 'timezone', 'sending_start', 'sending_end']),
                 'contacts_count' => $selectedCampaign->contacts_count,
                 'active_count' => $selectedCampaign->active_count,
+                'sendable_count' => $selectedCampaign->getAttribute('sendable_count'),
                 'replied_count' => $selectedCampaign->replied_count,
                 'bounced_count' => $selectedCampaign->bounced_count,
                 'sent_count' => $selectedCampaign->sent_count,

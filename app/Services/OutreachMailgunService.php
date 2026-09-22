@@ -29,7 +29,7 @@ class OutreachMailgunService
         $from = $fromName === '' ? $account->email : "{$fromName} <{$account->email}>";
         $replyAddress = $this->replyAddress($contact);
 
-        $response = Http::asForm()
+        $response = Http::asMultipart()
             ->withBasicAuth('api', (string) config('services.mailgun.secret'))
             ->timeout(30)
             ->post("{$endpoint}/v3/{$domain}/messages", [

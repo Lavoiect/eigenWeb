@@ -20,7 +20,10 @@ class SendOutreachEmail implements ShouldQueue
     /** @var array<int,int> */
     public array $backoff = [60, 300, 900];
 
-    public function __construct(public int $campaignContactId) {}
+    public function __construct(
+        public int $campaignContactId,
+        public bool $force = false,
+    ) {}
 
     public function handle(OutreachMailgunService $mailgun, OutreachPersonalization $personalization): void
     {
@@ -56,7 +59,7 @@ class SendOutreachEmail implements ShouldQueue
             ->where('sent_at', '>=', $dayStart)
             ->count();
 
-        if ($campaignSentToday >= $campaign->daily_limit || $accountSentToday >= $account->daily_limit) {
+        if (! $this->force && ($campaignSentToday >= $campaign->daily_limit || $accountSentToday >= $account->daily_limit)) {
             $contact->forceFill([
                 'status' => 'active',
                 'next_send_at' => Carbon::now($campaign->timezone)->addDay()->setTimeFromTimeString($campaign->sending_start)->utc(),
