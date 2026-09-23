@@ -99,6 +99,16 @@ class OutreachBirdService
 
     public function replyAddress(OutreachCampaignContact $contact): string
     {
+        $replyAddress = mb_strtolower(trim((string) config('services.bird.reply_address')));
+
+        if ($replyAddress !== '') {
+            if (filter_var($replyAddress, FILTER_VALIDATE_EMAIL) === false) {
+                throw new RuntimeException('Bird reply address is invalid.');
+            }
+
+            return $replyAddress;
+        }
+
         $domain = (string) config('services.bird.inbound_domain');
 
         if ($domain === '') {

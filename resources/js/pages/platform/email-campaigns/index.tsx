@@ -167,6 +167,7 @@ type PageProps = {
     bird_configured: boolean;
     bird_domain: string | null;
     bird_inbound_domain: string | null;
+    bird_reply_address: string | null;
 };
 
 const navItems = [
@@ -1857,12 +1858,12 @@ function SettingsSection({
     accounts,
     configured,
     domain,
-    inboundDomain,
+    replyRoute,
 }: {
     accounts: EmailAccount[];
     configured: boolean;
     domain: string | null;
-    inboundDomain: string | null;
+    replyRoute: string | null;
 }) {
     return (
         <div className="space-y-5">
@@ -1881,6 +1882,7 @@ function SettingsSection({
                     <AlertDescription>
                         Add <code>BIRD_API_KEY</code>,{' '}
                         <code>BIRD_SENDING_DOMAIN</code>,{' '}
+                        <code>BIRD_REPLY_ADDRESS</code> or{' '}
                         <code>BIRD_INBOUND_DOMAIN</code>, and{' '}
                         <code>BIRD_WEBHOOK_SECRET</code> to the environment,
                         then clear the configuration cache.
@@ -1898,8 +1900,7 @@ function SettingsSection({
                                         {account.email}
                                     </CardTitle>
                                     <CardDescription>
-                                        Bird sender · Replies routed by
-                                        webhook
+                                        Bird sender · Replies routed by webhook
                                     </CardDescription>
                                 </div>
                                 <CampaignStatus value={account.status} />
@@ -2111,10 +2112,10 @@ function SettingsSection({
                             </div>
                             <div className="rounded-lg bg-muted/50 p-3">
                                 <p className="text-muted-foreground">
-                                    Inbound domain
+                                    Reply routing
                                 </p>
                                 <code className="mt-1 block break-all">
-                                    {inboundDomain || 'Not configured'}
+                                    {replyRoute || 'Not configured'}
                                 </code>
                             </div>
                             <div>
@@ -2153,6 +2154,7 @@ export default function EmailCampaignWorkspace(props: PageProps) {
         bird_configured,
         bird_domain,
         bird_inbound_domain,
+        bird_reply_address,
     } = props;
 
     return (
@@ -2195,7 +2197,7 @@ export default function EmailCampaignWorkspace(props: PageProps) {
                         accounts={email_accounts}
                         configured={bird_configured}
                         domain={bird_domain}
-                        inboundDomain={bird_inbound_domain}
+                        replyRoute={bird_reply_address || bird_inbound_domain}
                     />
                 )}
             </main>

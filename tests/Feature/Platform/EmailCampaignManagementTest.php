@@ -437,6 +437,69 @@ test('a signed Bird inbound reply stops the sequence and appears in the inbox', 
     ]);
 });
 
+test('a Bird reply sent through a static forwarding address matches the outbound message', function () {
+    config(['services.bird.reply_address' => 'reply@eigen.test']);
+
+    $superAdmin = User::factory()->superAdmin()->create();
+    $account = outreachAccount($superAdmin);
+    $lead = outreachLead($superAdmin);
+    $campaign = OutreachCampaign::create([
+        'created_by_id' => $superAdmin->id,
+        'email_account_id' => $account->id,
+        'name' => 'Forwarded reply test',
+        'status' => 'active',
+        'daily_limit' => 25,
+        'timezone' => 'America/New_York',
+        'sending_start' => '09:00:00',
+        'sending_end' => '17:00:00',
+        'sending_days' => [1, 2, 3, 4, 5],
+    ]);
+    $contact = $campaign->contacts()->create([
+        'lead_id' => $lead->id,
+        'status' => 'active',
+        'current_step' => 1,
+        'next_send_at' => now()->addDays(3),
+    ]);
+    OutreachMessage::create([
+        'email_account_id' => $account->id,
+        'campaign_id' => $campaign->id,
+        'campaign_contact_id' => $contact->id,
+        'lead_id' => $lead->id,
+        'direction' => 'outbound',
+        'provider_message_id' => 'em_static_reply_1',
+        'subject' => 'Quick question',
+        'body' => 'Can we talk?',
+        'status' => 'sent',
+        'sent_at' => now(),
+    ]);
+    $payload = [
+        'type' => 'email.received',
+        'timestamp' => now()->toIso8601String(),
+        'data' => [
+            'inbound_message_id' => 'in_static_reply_1',
+            'to' => ['reply@eigen.test'],
+            'from' => 'mike@example.com',
+            'subject' => 'Re: Quick question',
+            'in_reply_to' => 'em_static_reply_1',
+        ],
+    ];
+
+    Http::fake([
+        'https://us1.platform.bird.com/v1/email/inbound-messages/in_static_reply_1/body' => Http::response([
+            'text' => 'Please send more details.',
+        ]),
+    ]);
+
+    $this->withHeaders(birdWebhookHeaders($payload))
+        ->postJson(route('webhooks.bird'), $payload)
+        ->assertOk()
+        ->assertJson(['accepted' => true, 'matched' => true]);
+
+    expect(app(OutreachBirdService::class)->replyAddress($contact))->toBe('reply@eigen.test')
+        ->and($contact->refresh()->status)->toBe('replied')
+        ->and($lead->refresh()->status)->toBe('replied');
+});
+
 test('Bird webhooks reject an invalid signature', function () {
     $this->withHeaders([
         'webhook-id' => 'whd_forged',

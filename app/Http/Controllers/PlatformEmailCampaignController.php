@@ -570,6 +570,7 @@ class PlatformEmailCampaignController extends Controller
             'bird_configured' => $this->birdConfigured(),
             'bird_domain' => config('services.bird.sending_domain'),
             'bird_inbound_domain' => config('services.bird.inbound_domain'),
+            'bird_reply_address' => config('services.bird.reply_address'),
         ]);
     }
 
@@ -578,7 +579,8 @@ class PlatformEmailCampaignController extends Controller
         return filled(config('services.bird.api_key'))
             && filled(config('services.bird.sending_domain'))
             && filled(config('services.bird.webhook_secret'))
-            && filled(config('services.bird.inbound_domain'));
+            && (filled(config('services.bird.reply_address'))
+                || filled(config('services.bird.inbound_domain')));
     }
 
     /** @param array<string,string> $record @param array<int,string> $keys */

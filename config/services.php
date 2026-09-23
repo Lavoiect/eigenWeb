@@ -46,6 +46,7 @@ return [
         'endpoint' => env('BIRD_ENDPOINT'),
         'sending_domain' => env('BIRD_SENDING_DOMAIN'),
         'inbound_domain' => env('BIRD_INBOUND_DOMAIN'),
+        'reply_address' => env('BIRD_REPLY_ADDRESS'),
         'webhook_secret' => env('BIRD_WEBHOOK_SECRET'),
         'from_name' => env('MAIL_FROM_NAME', env('APP_NAME')),
     ],
