@@ -58,7 +58,8 @@ class OutreachBirdWebhookController extends Controller
         }
 
         $contact = $this->contactFromRecipients($data, $bird)
-            ?? $this->contactFromReplyReference($data);
+            ?? $this->contactFromReplyReference($data)
+            ?? $this->contactFromSenderAndSubject($data);
 
         if ($contact === null) {
             return response()->json(['accepted' => true, 'matched' => false]);
@@ -141,6 +142,53 @@ class OutreachBirdWebhookController extends Controller
         return $message?->campaign_contact_id
             ? OutreachCampaignContact::query()->find($message->campaign_contact_id)
             : null;
+    }
+
+    /** @param array<string,mixed> $data */
+    private function contactFromSenderAndSubject(array $data): ?OutreachCampaignContact
+    {
+        $sender = $data['from'] ?? null;
+        $senderEmail = mb_strtolower(trim(is_array($sender)
+            ? (string) ($sender['email'] ?? $sender['address'] ?? '')
+            : (string) $sender));
+        $subject = $this->normalizedSubject((string) ($data['subject'] ?? ''));
+
+        if (filter_var($senderEmail, FILTER_VALIDATE_EMAIL) === false || $subject === '') {
+            return null;
+        }
+
+        $leadIds = OutreachLead::query()
+            ->whereRaw('LOWER(email) = ?', [$senderEmail])
+            ->pluck('id');
+
+        if ($leadIds->isEmpty()) {
+            return null;
+        }
+
+        $message = OutreachMessage::query()
+            ->whereIn('lead_id', $leadIds)
+            ->where('direction', 'outbound')
+            ->where('status', 'sent')
+            ->whereNotNull('campaign_contact_id')
+            ->latest('sent_at')
+            ->limit(50)
+            ->get()
+            ->first(fn (OutreachMessage $message): bool => $this->normalizedSubject((string) $message->subject) === $subject);
+
+        return $message?->campaign_contact_id
+            ? OutreachCampaignContact::query()->find($message->campaign_contact_id)
+            : null;
+    }
+
+    private function normalizedSubject(string $subject): string
+    {
+        $normalized = trim($subject);
+
+        while (preg_match('/^(?:re|fw|fwd)\s*:\s*/i', $normalized) === 1) {
+            $normalized = trim((string) preg_replace('/^(?:re|fw|fwd)\s*:\s*/i', '', $normalized, 1));
+        }
+
+        return mb_strtolower($normalized);
     }
 
     /** @param array<string,mixed> $data */

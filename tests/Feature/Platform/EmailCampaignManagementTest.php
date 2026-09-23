@@ -478,9 +478,9 @@ test('a Bird reply sent through a static forwarding address matches the outbound
         'data' => [
             'inbound_message_id' => 'in_static_reply_1',
             'to' => ['reply@eigen.test'],
-            'from' => 'mike@example.com',
+            'from' => ['email' => 'mike@example.com', 'name' => 'Mike'],
             'subject' => 'Re: Quick question',
-            'in_reply_to' => 'em_static_reply_1',
+            'in_reply_to' => '<smtp-id-that-differs-from-bird-id@sparkpost>',
         ],
     ];
 
