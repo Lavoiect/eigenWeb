@@ -13,6 +13,7 @@ import {
     MailCheck,
     MessageSquareReply,
     Pause,
+    Pencil,
     Play,
     Plus,
     Search,
@@ -1492,6 +1493,9 @@ function LeadsSection({
     const [status, setStatus] = useState('all');
     const [addOpen, setAddOpen] = useState(false);
     const [importOpen, setImportOpen] = useState(false);
+    const [editingLead, setEditingLead] = useState<Lead | null>(null);
+    const [selectedIds, setSelectedIds] = useState<number[]>([]);
+    const [deleteTargets, setDeleteTargets] = useState<Lead[]>([]);
     const filtered = leads.filter(
         (lead) =>
             (status === 'all' || lead.status === status) &&
@@ -1499,6 +1503,11 @@ function LeadsSection({
                 (value) => value?.toLowerCase().includes(deferredQuery),
             ),
     );
+    const selectedLeads = filtered.filter((lead) =>
+        selectedIds.includes(lead.id),
+    );
+    const allSelected =
+        filtered.length > 0 && selectedLeads.length === filtered.length;
 
     return (
         <>
@@ -1520,7 +1529,12 @@ function LeadsSection({
                         >
                             <Upload /> Import CSV
                         </Button>
-                        <Button onClick={() => setAddOpen(true)}>
+                        <Button
+                            onClick={() => {
+                                setEditingLead(null);
+                                setAddOpen(true);
+                            }}
+                        >
                             <UserPlus /> Add lead
                         </Button>
                     </div>
@@ -1550,10 +1564,47 @@ function LeadsSection({
                     </Select>
                 </div>
                 <Card className="gap-0 overflow-hidden py-0 shadow-none">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3">
+                        <label className="flex min-h-10 cursor-pointer items-center gap-3 text-sm">
+                            <input
+                                type="checkbox"
+                                className="size-4 accent-emerald-700"
+                                checked={allSelected}
+                                ref={(node) => {
+                                    if (node) {
+                                        node.indeterminate =
+                                            selectedLeads.length > 0 &&
+                                            !allSelected;
+                                    }
+                                }}
+                                disabled={filtered.length === 0}
+                                onChange={(event) =>
+                                    setSelectedIds(
+                                        event.target.checked
+                                            ? filtered.map((lead) => lead.id)
+                                            : [],
+                                    )
+                                }
+                            />
+                            Select all matching leads ({filtered.length})
+                        </label>
+                        <Button
+                            variant="destructive"
+                            disabled={selectedLeads.length === 0}
+                            onClick={() => setDeleteTargets(selectedLeads)}
+                        >
+                            <Trash2 /> Delete selected ({selectedLeads.length})
+                        </Button>
+                    </div>
                     <div className="overflow-x-auto">
                         <table className="w-full min-w-[860px] text-left text-sm">
                             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                                 <tr>
+                                    <th className="w-12 px-5 py-3">
+                                        <span className="sr-only">
+                                            Select lead
+                                        </span>
+                                    </th>
                                     <th className="px-5 py-3 font-medium">
                                         Lead
                                     </th>
@@ -1569,6 +1620,9 @@ function LeadsSection({
                                     <th className="px-5 py-3 font-medium">
                                         Status
                                     </th>
+                                    <th className="px-5 py-3 font-medium">
+                                        Actions
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
@@ -1577,6 +1631,27 @@ function LeadsSection({
                                         key={lead.id}
                                         className="hover:bg-muted/20"
                                     >
+                                        <td className="px-5 py-4">
+                                            <input
+                                                type="checkbox"
+                                                className="size-4 accent-emerald-700"
+                                                aria-label={`Select ${lead.email}`}
+                                                checked={selectedIds.includes(
+                                                    lead.id,
+                                                )}
+                                                onChange={(event) =>
+                                                    setSelectedIds((ids) =>
+                                                        event.target.checked
+                                                            ? [...ids, lead.id]
+                                                            : ids.filter(
+                                                                  (id) =>
+                                                                      id !==
+                                                                      lead.id,
+                                                              ),
+                                                    )
+                                                }
+                                            />
+                                        </td>
                                         <td className="px-5 py-4">
                                             <p className="font-medium">
                                                 {displayName(lead)}
@@ -1631,6 +1706,32 @@ function LeadsSection({
                                                 </SelectContent>
                                             </Select>
                                         </td>
+                                        <td className="px-5 py-4">
+                                            <div className="flex gap-2">
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    aria-label={`Edit ${lead.email}`}
+                                                    onClick={() => {
+                                                        setEditingLead(lead);
+                                                        setAddOpen(true);
+                                                    }}
+                                                >
+                                                    <Pencil /> Edit
+                                                </Button>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="text-destructive"
+                                                    aria-label={`Delete ${lead.email}`}
+                                                    onClick={() =>
+                                                        setDeleteTargets([lead])
+                                                    }
+                                                >
+                                                    <Trash2 /> Delete
+                                                </Button>
+                                            </div>
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -1647,6 +1748,79 @@ function LeadsSection({
                     )}
                 </Card>
             </div>
+            <Dialog
+                open={deleteTargets.length > 0}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setDeleteTargets([]);
+                    }
+                }}
+            >
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>
+                            {deleteTargets.length === 1
+                                ? `Delete ${deleteTargets[0].email}?`
+                                : `Delete ${deleteTargets.length} leads?`}
+                        </DialogTitle>
+                        <DialogDescription>
+                            This permanently deletes the selected leads, removes
+                            them from every campaign, and deletes their stored
+                            replies. Sending history is retained. This cannot be
+                            undone.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <Form
+                        action={
+                            deleteTargets.length === 1
+                                ? `/platform/email-campaigns/leads/${deleteTargets[0].id}`
+                                : '/platform/email-campaigns/leads'
+                        }
+                        method="delete"
+                        options={{ preserveScroll: true }}
+                        onSuccess={() => {
+                            setDeleteTargets([]);
+                            setSelectedIds([]);
+                        }}
+                    >
+                        {({ processing, errors }) => (
+                            <>
+                                {deleteTargets.map((lead) => (
+                                    <input
+                                        key={lead.id}
+                                        type="hidden"
+                                        name="lead_ids[]"
+                                        value={lead.id}
+                                    />
+                                ))}
+                                {Object.entries(errors).map(([key, error]) => (
+                                    <InputError key={key} message={error} />
+                                ))}
+                                <DialogFooter>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        disabled={processing}
+                                        onClick={() => setDeleteTargets([])}
+                                    >
+                                        Cancel
+                                    </Button>
+                                    <Button
+                                        variant="destructive"
+                                        disabled={processing}
+                                    >
+                                        {processing ? <Spinner /> : <Trash2 />}{' '}
+                                        Delete{' '}
+                                        {deleteTargets.length === 1
+                                            ? 'lead'
+                                            : `${deleteTargets.length} leads`}
+                                    </Button>
+                                </DialogFooter>
+                            </>
+                        )}
+                    </Form>
+                </DialogContent>
+            </Dialog>
             <Dialog open={importOpen} onOpenChange={setImportOpen}>
                 <DialogContent>
                     <DialogHeader>
@@ -1717,15 +1891,23 @@ function LeadsSection({
             <Dialog open={addOpen} onOpenChange={setAddOpen}>
                 <DialogContent className="sm:max-w-2xl">
                     <DialogHeader>
-                        <DialogTitle>Add lead</DialogTitle>
+                        <DialogTitle>
+                            {editingLead ? 'Edit lead' : 'Add lead'}
+                        </DialogTitle>
                         <DialogDescription>
-                            Add one prospect now. You can enrich the optional
-                            fields later.
+                            {editingLead
+                                ? 'Update this prospect’s contact details and personalization.'
+                                : 'Add one prospect now. You can enrich the optional fields later.'}
                         </DialogDescription>
                     </DialogHeader>
                     <Form
-                        action="/platform/email-campaigns/leads"
-                        method="post"
+                        key={editingLead?.id ?? 'new'}
+                        action={
+                            editingLead
+                                ? `/platform/email-campaigns/leads/${editingLead.id}`
+                                : '/platform/email-campaigns/leads'
+                        }
+                        method={editingLead ? 'patch' : 'post'}
                         className="space-y-4"
                         onSuccess={() => setAddOpen(false)}
                         resetOnSuccess
@@ -1737,18 +1919,32 @@ function LeadsSection({
                                         label="First name"
                                         error={errors.first_name}
                                     >
-                                        <Input name="first_name" autoFocus />
+                                        <Input
+                                            name="first_name"
+                                            defaultValue={
+                                                editingLead?.first_name ?? ''
+                                            }
+                                            autoFocus
+                                        />
                                     </Field>
                                     <Field
                                         label="Last name"
                                         error={errors.last_name}
                                     >
-                                        <Input name="last_name" />
+                                        <Input
+                                            name="last_name"
+                                            defaultValue={
+                                                editingLead?.last_name ?? ''
+                                            }
+                                        />
                                     </Field>
                                     <Field label="Email" error={errors.email}>
                                         <Input
                                             name="email"
                                             type="email"
+                                            defaultValue={
+                                                editingLead?.email ?? ''
+                                            }
                                             required
                                         />
                                     </Field>
@@ -1756,22 +1952,42 @@ function LeadsSection({
                                         label="Company"
                                         error={errors.company}
                                     >
-                                        <Input name="company" />
+                                        <Input
+                                            name="company"
+                                            defaultValue={
+                                                editingLead?.company ?? ''
+                                            }
+                                        />
                                     </Field>
                                     <Field
                                         label="Job title"
                                         error={errors.job_title}
                                     >
-                                        <Input name="job_title" />
+                                        <Input
+                                            name="job_title"
+                                            defaultValue={
+                                                editingLead?.job_title ?? ''
+                                            }
+                                        />
                                     </Field>
                                     <Field label="City" error={errors.city}>
-                                        <Input name="city" />
+                                        <Input
+                                            name="city"
+                                            defaultValue={
+                                                editingLead?.city ?? ''
+                                            }
+                                        />
                                     </Field>
                                     <Field
                                         label="Industry"
                                         error={errors.industry}
                                     >
-                                        <Input name="industry" />
+                                        <Input
+                                            name="industry"
+                                            defaultValue={
+                                                editingLead?.industry ?? ''
+                                            }
+                                        />
                                     </Field>
                                     <Field
                                         label="Custom personalization"
@@ -1779,6 +1995,9 @@ function LeadsSection({
                                     >
                                         <Input
                                             name="custom_1"
+                                            defaultValue={
+                                                editingLead?.custom_1 ?? ''
+                                            }
                                             placeholder="75 field technicians"
                                         />
                                     </Field>
@@ -1792,7 +2011,10 @@ function LeadsSection({
                                         Cancel
                                     </Button>
                                     <Button disabled={processing}>
-                                        {processing && <Spinner />} Add lead
+                                        {processing && <Spinner />}{' '}
+                                        {editingLead
+                                            ? 'Save changes'
+                                            : 'Add lead'}
                                     </Button>
                                 </DialogFooter>
                             </>

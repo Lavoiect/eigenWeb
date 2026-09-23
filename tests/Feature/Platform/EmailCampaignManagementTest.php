@@ -117,6 +117,82 @@ test('a Super Admin can import leads from the downloadable CSV format', function
     $this->assertDatabaseCount('outreach_leads', 1);
 });
 
+test('lead details can be edited without resetting status and duplicate emails are rejected', function () {
+    $admin = User::factory()->superAdmin()->create();
+    $lead = outreachLead($admin, ['status' => 'unsubscribed']);
+    $other = outreachLead($admin, ['email' => 'other@example.com', 'unsubscribe_token' => str_repeat('b', 48)]);
+
+    $this->actingAs($admin)->patch(route('platform.email-campaigns.leads.update', $lead), [
+        'email' => ' UPDATED@example.com ', 'first_name' => 'Chris', 'last_name' => 'Taylor',
+        'company' => 'New Company', 'job_title' => 'Director', 'city' => 'Boston',
+        'industry' => 'Telecom', 'custom_1' => '100 technicians',
+    ])->assertSessionHasNoErrors();
+
+    expect($lead->refresh()->email)->toBe('updated@example.com')
+        ->and($lead->first_name)->toBe('Chris')->and($lead->last_name)->toBe('Taylor')
+        ->and($lead->company)->toBe('New Company')->and($lead->job_title)->toBe('Director')
+        ->and($lead->city)->toBe('Boston')->and($lead->industry)->toBe('Telecom')
+        ->and($lead->custom_1)->toBe('100 technicians')->and($lead->status)->toBe('unsubscribed');
+
+    $this->patch(route('platform.email-campaigns.leads.update', $lead), ['email' => strtoupper($other->email)])
+        ->assertSessionHasErrors('email');
+    expect($lead->refresh()->email)->toBe('updated@example.com');
+    $this->patch(route('platform.email-campaigns.leads.update', $lead), ['status' => 'interested'])
+        ->assertSessionHasNoErrors();
+    expect($lead->refresh()->status)->toBe('interested');
+});
+
+test('deleting leads removes enrollments and replies while retaining send counts and other leads', function (bool $bulk) {
+    Http::preventStrayRequests();
+    $admin = User::factory()->superAdmin()->create();
+    $account = outreachAccount($admin);
+    $lead = outreachLead($admin);
+    $second = outreachLead($admin, ['email' => 'second@example.com', 'unsubscribe_token' => str_repeat('b', 48)]);
+    $retained = outreachLead($admin, ['email' => 'retained@example.com', 'unsubscribe_token' => str_repeat('c', 48)]);
+    $campaign = OutreachCampaign::create([
+        'created_by_id' => $admin->id, 'email_account_id' => $account->id,
+        'name' => 'Deletion test', 'status' => 'active',
+    ]);
+    $contact = $campaign->contacts()->create(['lead_id' => $lead->id, 'status' => 'sending', 'next_send_at' => now()]);
+    foreach (['inbound', 'outbound'] as $direction) {
+        OutreachMessage::create([
+            'email_account_id' => $account->id, 'campaign_id' => $campaign->id,
+            'campaign_contact_id' => $contact->id, 'lead_id' => $lead->id,
+            'direction' => $direction, 'status' => $direction === 'inbound' ? 'received' : 'sent',
+            'provider_message_id' => "lead-delete-{$direction}", 'sent_at' => now(),
+        ]);
+    }
+    $this->actingAs($admin)->delete(
+        $bulk ? route('platform.email-campaigns.leads.bulk-destroy') : route('platform.email-campaigns.leads.destroy', $lead),
+        $bulk ? ['lead_ids' => [$lead->id, $second->id]] : [],
+    )->assertRedirect()->assertSessionHasNoErrors();
+
+    $this->assertModelMissing($lead);
+    $this->assertModelMissing($contact);
+    $this->assertModelExists($retained);
+    $bulk ? $this->assertModelMissing($second) : $this->assertModelExists($second);
+    $this->assertDatabaseMissing('outreach_messages', ['provider_message_id' => 'lead-delete-inbound']);
+    $this->assertDatabaseHas('outreach_messages', ['provider_message_id' => 'lead-delete-outbound', 'lead_id' => null, 'status' => 'sent']);
+    expect($campaign->refresh()->status)->toBe('completed');
+    (new SendOutreachEmail($contact->id))->handle(app(OutreachBirdService::class), app(OutreachPersonalization::class));
+    Http::assertNothingSent();
+})->with([false, true]);
+
+test('lead deletion requires valid selected ids and Super Admin access', function () {
+    $admin = User::factory()->superAdmin()->create();
+    $lead = outreachLead($admin);
+    $this->actingAs($admin)->delete(route('platform.email-campaigns.leads.bulk-destroy'), ['lead_ids' => []])
+        ->assertSessionHasErrors('lead_ids');
+    $this->delete(route('platform.email-campaigns.leads.bulk-destroy'), ['lead_ids' => [$lead->id, 99999]])
+        ->assertSessionHasErrors('lead_ids.1');
+    $customer = User::factory()->organizationAdmin(Organization::factory()->create())->create();
+    $this->actingAs($customer)->delete(route('platform.email-campaigns.leads.destroy', $lead))->assertForbidden();
+    $this->delete(route('platform.email-campaigns.leads.bulk-destroy'), ['lead_ids' => [$lead->id]])->assertForbidden();
+    $this->patch(route('platform.email-campaigns.leads.update', $lead), ['first_name' => 'Changed'])->assertForbidden();
+    $this->assertModelExists($lead);
+    expect($lead->refresh()->first_name)->toBe('Mike');
+});
+
 test('a Super Admin can create and start a campaign sequence', function () {
     Queue::fake();
     $superAdmin = User::factory()->superAdmin()->create();
@@ -431,6 +507,7 @@ test('a forced campaign email bypasses daily limits, is personalized, and comple
         && $request->hasHeader('Authorization', 'Bearer bk_us1_bird-api-key')
         && $request['to'] === ['mike@example.com']
         && $request['subject'] === 'Quick question for ABC Telecom'
+        && $request['text'] === 'Hi Mike, can we talk?'
         && str_starts_with($request['reply_to'][0], 'reply+'.$contact->id.'.')
         && $request['metadata']['campaign_contact_id'] === $contact->id
         && $request['category'] === 'marketing');
@@ -567,6 +644,22 @@ test('Bird webhooks reject an invalid signature', function () {
         'data' => ['inbound_message_id' => 'in_forged'],
     ])->assertForbidden();
 });
+
+test('Bird unsubscribe links stop future campaign emails', function (string $type) {
+    $admin = User::factory()->superAdmin()->create();
+    $lead = outreachLead($admin);
+    $campaign = OutreachCampaign::create([
+        'created_by_id' => $admin->id, 'name' => 'Unsubscribe test', 'status' => 'active',
+    ]);
+    $contact = $campaign->contacts()->create(['lead_id' => $lead->id, 'status' => 'sending', 'next_send_at' => now()]);
+    $payload = ['type' => $type, 'data' => [
+        'recipient' => $lead->email, 'metadata' => ['campaign_contact_id' => $contact->id],
+    ]];
+    $this->withHeaders(birdWebhookHeaders($payload))->postJson(route('webhooks.bird'), $payload)->assertOk();
+    expect($lead->refresh()->status)->toBe('unsubscribed')
+        ->and($contact->refresh()->status)->toBe('unsubscribed')
+        ->and($contact->next_send_at)->toBeNull();
+})->with(['email.unsubscribed', 'email.list_unsubscribed']);
 
 test('a Bird bounce stops the sequence as bounced', function () {
     $superAdmin = User::factory()->superAdmin()->create();

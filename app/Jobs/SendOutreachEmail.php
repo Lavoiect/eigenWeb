@@ -89,7 +89,7 @@ class SendOutreachEmail implements ShouldQueue
 
         $subject = $personalization->render($step->subject, $lead);
         $body = $personalization->render($step->body, $lead);
-        $body .= "\n\n---\nIf you would rather not receive these emails, unsubscribe: ".url('/outreach/unsubscribe/'.$lead->unsubscribe_token);
+        // Bird adds the unsubscribe footer for marketing messages.
 
         try {
             $providerMessage = $bird->send($account, $contact, $lead->email, $subject, $body);

@@ -158,16 +158,28 @@ class PlatformEmailCampaignController extends Controller
 
     public function updateLead(Request $request, OutreachLead $lead): RedirectResponse
     {
+        if ($request->has('email')) {
+            $request->merge(['email' => mb_strtolower(trim((string) $request->input('email')))]);
+        }
+
         $validated = $request->validate([
-            'status' => ['required', Rule::in(array_keys(OutreachLead::STATUSES))],
+            'email' => ['sometimes', 'required', 'email', 'max:255', Rule::unique('outreach_leads', 'email')->ignore($lead)],
+            'first_name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'last_name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'company' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'job_title' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'city' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'industry' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'custom_1' => ['sometimes', 'nullable', 'string', 'max:2000'],
+            'status' => ['sometimes', 'required', Rule::in(array_keys(OutreachLead::STATUSES))],
         ]);
 
         $lead->forceFill([
-            'status' => $validated['status'],
-            'replied_at' => $validated['status'] === 'replied' ? ($lead->replied_at ?? now()) : $lead->replied_at,
+            ...$validated,
+            'replied_at' => ($validated['status'] ?? null) === 'replied' ? ($lead->replied_at ?? now()) : $lead->replied_at,
         ])->save();
 
-        if (in_array($validated['status'], ['replied', 'not_interested', 'bounced', 'unsubscribed'], true)) {
+        if (in_array($validated['status'] ?? null, ['replied', 'not_interested', 'bounced', 'unsubscribed'], true)) {
             $campaignIds = $lead->campaignContacts()
                 ->whereIn('status', ['queued', 'active', 'sending', 'paused'])
                 ->pluck('campaign_id');
@@ -177,7 +189,39 @@ class PlatformEmailCampaignController extends Controller
             OutreachCampaign::query()->whereIn('id', $campaignIds)->get()->each->completeIfFinished();
         }
 
-        return back()->with('status', 'Lead status updated.');
+        return back()->with('status', 'Lead updated.');
+    }
+
+    public function destroyLead(OutreachLead $lead): RedirectResponse
+    {
+        $this->deleteLeads([$lead->getKey()]);
+
+        return back()->with('status', 'Lead deleted.');
+    }
+
+    public function destroyLeads(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'lead_ids' => ['required', 'array', 'min:1', 'max:1000'],
+            'lead_ids.*' => ['required', 'integer', 'distinct', Rule::exists('outreach_leads', 'id')],
+        ]);
+        $count = $this->deleteLeads($validated['lead_ids']);
+
+        return back()->with('status', "Deleted {$count} leads.");
+    }
+
+    /** @param array<int,int> $leadIds */
+    private function deleteLeads(array $leadIds): int
+    {
+        return DB::transaction(function () use ($leadIds): int {
+            $campaignIds = OutreachCampaignContact::query()->whereIn('lead_id', $leadIds)->pluck('campaign_id')->unique();
+            OutreachMessage::query()->whereIn('lead_id', $leadIds)->where('direction', 'inbound')->delete();
+            // Keep outbound send records so deleting leads cannot reset daily sending limits.
+            $count = OutreachLead::query()->whereIn('id', $leadIds)->delete();
+            OutreachCampaign::query()->whereIn('id', $campaignIds)->get()->each->completeIfFinished();
+
+            return $count;
+        });
     }
 
     public function storeCampaign(Request $request): RedirectResponse

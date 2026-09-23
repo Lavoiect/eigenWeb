@@ -61,6 +61,8 @@ Route::middleware(['auth', 'verified', 'password.changed'])->group(function () {
                 Route::post('leads', [PlatformEmailCampaignController::class, 'storeLead'])->name('platform.email-campaigns.leads.store');
                 Route::post('leads/import', [PlatformEmailCampaignController::class, 'importLeads'])->name('platform.email-campaigns.leads.import');
                 Route::patch('leads/{lead}', [PlatformEmailCampaignController::class, 'updateLead'])->name('platform.email-campaigns.leads.update');
+                Route::delete('leads', [PlatformEmailCampaignController::class, 'destroyLeads'])->name('platform.email-campaigns.leads.bulk-destroy');
+                Route::delete('leads/{lead}', [PlatformEmailCampaignController::class, 'destroyLead'])->name('platform.email-campaigns.leads.destroy');
                 Route::get('inbox', [PlatformEmailCampaignController::class, 'inbox'])->name('platform.email-campaigns.inbox');
                 Route::get('settings', [PlatformEmailCampaignController::class, 'settings'])->name('platform.email-campaigns.settings');
                 Route::post('settings/accounts', [PlatformEmailCampaignController::class, 'storeEmailAccount'])->name('platform.email-campaigns.accounts.store');
