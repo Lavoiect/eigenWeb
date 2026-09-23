@@ -20,6 +20,7 @@ import {
     Settings,
     ShieldCheck,
     Sparkles,
+    Trash2,
     Upload,
     UserPlus,
     Users,
@@ -372,6 +373,76 @@ function CampaignStatus({ value }: { value: string }) {
     );
 }
 
+function DeleteCampaignButton({
+    campaignId,
+    campaignName,
+}: {
+    campaignId: number;
+    campaignName: string;
+}) {
+    const [open, setOpen] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+
+    const destroy = () => {
+        setDeleting(true);
+        router.delete(`/platform/email-campaigns/campaigns/${campaignId}`, {
+            preserveScroll: true,
+            onFinish: () => setDeleting(false),
+        });
+    };
+
+    return (
+        <>
+            <Button
+                type="button"
+                variant="outline"
+                className="border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => setOpen(true)}
+            >
+                <Trash2 /> Delete
+            </Button>
+            <Dialog
+                open={open}
+                onOpenChange={(nextOpen) => {
+                    if (!deleting) {
+                        setOpen(nextOpen);
+                    }
+                }}
+            >
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Delete {campaignName}?</DialogTitle>
+                        <DialogDescription>
+                            This permanently removes the campaign, its sequence,
+                            sending history, and every stored reply connected to
+                            it. Lead records will remain available.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            disabled={deleting}
+                            onClick={() => setOpen(false)}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="destructive"
+                            disabled={deleting}
+                            onClick={destroy}
+                        >
+                            {deleting ? <Spinner /> : <Trash2 />}
+                            Delete campaign
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </>
+    );
+}
+
 function DashboardSection({
     stats,
     campaigns,
@@ -668,17 +739,23 @@ function CampaignsSection({
                                         value={campaign.interested_count}
                                     />
                                 </div>
-                                <Button
-                                    variant="outline"
-                                    className="w-full"
-                                    asChild
-                                >
-                                    <Link
-                                        href={`/platform/email-campaigns/campaigns/${campaign.id}`}
+                                <div className="flex gap-2">
+                                    <Button
+                                        variant="outline"
+                                        className="flex-1"
+                                        asChild
                                     >
-                                        Open campaign <ArrowRight />
-                                    </Link>
-                                </Button>
+                                        <Link
+                                            href={`/platform/email-campaigns/campaigns/${campaign.id}`}
+                                        >
+                                            Open campaign <ArrowRight />
+                                        </Link>
+                                    </Button>
+                                    <DeleteCampaignButton
+                                        campaignId={campaign.id}
+                                        campaignName={campaign.name}
+                                    />
+                                </div>
                             </CardContent>
                         </Card>
                     ))}
@@ -994,6 +1071,10 @@ function CampaignEditor({
                     </h2>
                 </div>
                 <div className="flex gap-2">
+                    <DeleteCampaignButton
+                        campaignId={campaign.id}
+                        campaignName={campaign.name}
+                    />
                     {campaign.status === 'active' ? (
                         <>
                             <Button

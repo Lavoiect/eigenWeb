@@ -52,6 +52,7 @@ Route::middleware(['auth', 'verified', 'password.changed'])->group(function () {
                 Route::post('campaigns', [PlatformEmailCampaignController::class, 'storeCampaign'])->name('platform.email-campaigns.campaigns.store');
                 Route::get('campaigns/{campaign}', [PlatformEmailCampaignController::class, 'showCampaign'])->name('platform.email-campaigns.campaigns.show');
                 Route::put('campaigns/{campaign}', [PlatformEmailCampaignController::class, 'updateCampaign'])->name('platform.email-campaigns.campaigns.update');
+                Route::delete('campaigns/{campaign}', [PlatformEmailCampaignController::class, 'destroyCampaign'])->name('platform.email-campaigns.campaigns.destroy');
                 Route::post('campaigns/{campaign}/start', [PlatformEmailCampaignController::class, 'startCampaign'])->name('platform.email-campaigns.campaigns.start');
                 Route::post('campaigns/{campaign}/pause', [PlatformEmailCampaignController::class, 'pauseCampaign'])->name('platform.email-campaigns.campaigns.pause');
                 Route::post('campaigns/{campaign}/debug-send-now', [PlatformEmailCampaignController::class, 'debugSendNow'])->name('platform.email-campaigns.campaigns.debug-send-now');

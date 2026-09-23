@@ -149,6 +149,63 @@ test('a Super Admin can create and start a campaign sequence', function () {
     Queue::assertPushed(SendOutreachEmail::class, fn (SendOutreachEmail $job): bool => $job->campaignContactId === $campaign->contacts()->firstOrFail()->id);
 });
 
+test('a Super Admin can delete a campaign and its stored replies without deleting leads', function () {
+    $superAdmin = User::factory()->superAdmin()->create();
+    $account = outreachAccount($superAdmin);
+    $lead = outreachLead($superAdmin);
+    $campaign = OutreachCampaign::create([
+        'created_by_id' => $superAdmin->id,
+        'email_account_id' => $account->id,
+        'name' => 'Disposable campaign',
+        'status' => 'paused',
+        'daily_limit' => 25,
+        'timezone' => 'America/New_York',
+        'sending_start' => '09:00:00',
+        'sending_end' => '17:00:00',
+        'sending_days' => [1, 2, 3, 4, 5],
+    ]);
+    $step = $campaign->steps()->create([
+        'position' => 1,
+        'delay_days' => 0,
+        'subject' => 'Quick question',
+        'body' => 'Can we talk?',
+    ]);
+    $contact = $campaign->contacts()->create([
+        'lead_id' => $lead->id,
+        'status' => 'replied',
+        'current_step' => 1,
+    ]);
+
+    foreach (['outbound', 'inbound'] as $direction) {
+        OutreachMessage::create([
+            'email_account_id' => $account->id,
+            'campaign_id' => $campaign->id,
+            'campaign_contact_id' => $contact->id,
+            'lead_id' => $lead->id,
+            'campaign_step_id' => $step->id,
+            'direction' => $direction,
+            'provider_message_id' => "delete-test-{$direction}",
+            'subject' => $direction === 'inbound' ? 'Re: Quick question' : 'Quick question',
+            'body' => 'Message body',
+            'status' => $direction === 'inbound' ? 'received' : 'sent',
+            'sent_at' => $direction === 'outbound' ? now() : null,
+            'received_at' => $direction === 'inbound' ? now() : null,
+        ]);
+    }
+
+    $this->actingAs($superAdmin)
+        ->delete(route('platform.email-campaigns.campaigns.destroy', $campaign))
+        ->assertRedirect(route('platform.email-campaigns.campaigns'))
+        ->assertSessionHas('status', 'Campaign and its stored replies were deleted.');
+
+    $this->assertDatabaseMissing('outreach_campaigns', ['id' => $campaign->id]);
+    $this->assertDatabaseMissing('outreach_campaign_contacts', ['campaign_id' => $campaign->id]);
+    $this->assertDatabaseMissing('outreach_campaign_steps', ['campaign_id' => $campaign->id]);
+    $this->assertDatabaseMissing('outreach_messages', ['provider_message_id' => 'delete-test-outbound']);
+    $this->assertDatabaseMissing('outreach_messages', ['provider_message_id' => 'delete-test-inbound']);
+    $this->assertDatabaseHas('outreach_leads', ['id' => $lead->id]);
+});
+
 test('debug send now queues every eligible pending lead and bypasses delivery limits', function () {
     Queue::fake();
     $superAdmin = User::factory()->superAdmin()->create();

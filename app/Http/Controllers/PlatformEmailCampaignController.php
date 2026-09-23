@@ -286,6 +286,22 @@ class PlatformEmailCampaignController extends Controller
         return back()->with('status', 'Campaign sequence saved.');
     }
 
+    public function destroyCampaign(OutreachCampaign $campaign): RedirectResponse
+    {
+        DB::transaction(function () use ($campaign): void {
+            $campaign->contacts()->update([
+                'status' => 'stopped',
+                'next_send_at' => null,
+                'stopped_at' => now(),
+            ]);
+            $campaign->messages()->delete();
+            $campaign->delete();
+        });
+
+        return redirect()->route('platform.email-campaigns.campaigns')
+            ->with('status', 'Campaign and its stored replies were deleted.');
+    }
+
     public function startCampaign(Request $request, OutreachCampaign $campaign): RedirectResponse
     {
         if ($request->boolean('debug_send_now')) {
